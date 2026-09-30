@@ -1,40 +1,33 @@
 /**
- * 『ナウキ運び』面白さ8軸評価システム (Enhanced Fun Evaluator v2)
+ * 『ナウキ運び』面白さ8軸評価システム (Enhanced Fun Evaluator)
  * ─────────────────────────────────────────────────────
- * 8つの独立軸で「面白さ」を定量評価し、最終100点満点でスコアリング。
+ * README.md / RULEBOOK.md の公式仕様に完全準拠したヘッドレス評価エンジン。
  *
- * 【8軸】
+ * 【8軸評価】
  *  1. 🔥 接戦度 (Closeness)        — 1-2位差、逆転率、同時リーチ率
  *  2. ⚖️ 戦略多様性 (Diversity)    — 勝率ジニ係数、全戦略の実効性
  *  3. ⚡ テンポ (Pacing)           — 決着ラウンド分布、安定性
- *  4. 📦 成長・達成感 (Growth)     — 荷箱増設率、桐箱強化率
+ *  4. 📦 成長・達成感 (Growth)     — 大箱化率、荷積み達成率
  *  5. 🧠 悩ましさ (Dilemma)        — 手番あたりの有効選択肢数、次善手との差
- *  6. 📈 ドラマ性 (Drama)          — リードチェンジ回数、逆転劇のタイミング
- *  7. 🤝 相互作用 (Interaction)    — マス上カード争奪、経路競合
- *  8. 🎯 公平性 (Fairness)         — 手番順バイアスの少なさ
+ *  6. 📈 ドラマ性 (Drama)          — リードチェンジ回数、終盤の逆転劇
+ *  7. 🤝 相互作用 (Interaction)    — 市場カード争奪、経路競合
+ *  8. 🎯 公平性 (Fairness)         — 手番順（座順）バイアスの少なさ
  */
 
-// ── 定数 ──────────────────────────────────────────
 const CARD_TEMPLATES = {
   tea:   [{ num: 1, salt: 2 }, { num: 2, salt: 1 }, { num: 3, salt: 1 }, { num: 4, salt: 1 }, { num: 5, salt: 2 }],
   rice:  [{ num: 1, salt: 2 }, { num: 2, salt: 1 }, { num: 3, salt: 1 }, { num: 4, salt: 1 }, { num: 5, salt: 2 }],
   cloth: [{ num: 1, salt: 2 }, { num: 2, salt: 1 }, { num: 3, salt: 1 }, { num: 4, salt: 1 }, { num: 5, salt: 2 }]
 };
 
-const HAND_LIMIT  = 5;
-const WIN_SCORE   = 20;
-const BOX_COSTS   = [1, 3, 7];
-const FLIP_COST   = 2;
-const WOOD_BONUS  = 0;
-const FLIP_BONUS  = 3;
-const BOX_TILES   = [1, 9];   // 箱屋: 1, 9 (線対称)
-const PORT_TILE   = 5;        // 港: 5
-const GUILD_TILES = [3, 7];   // 会所: 3, 7 (線対称)
-// マス2, 8 および 4, 6 は「街道」（施設アクションなし）
+const HAND_LIMIT = 5;
+const WIN_SCORE = 20;
+const BIG_BOX_COST = 2;
+const BIG_BOX_BONUS = 3;
+const SET_BONUS = 2;
+const TREND_BONUS = 2;
 const CARD_COPIES = 4;
 
-// ── 4市場＋拠点独立制（全6エリア）のマッピング ────────
-// 0: 地元(0), 1: 箱屋市場(1,9), 2: 街道市場A(2,8), 3: 会所市場(3,7), 4: 街道市場B(4,6), 5: 港(5)
 function getMarketIndex(pos) {
   if (pos === 0) return 0;
   if (pos === 1 || pos === 9) return 1;
@@ -45,7 +38,6 @@ function getMarketIndex(pos) {
   return 0;
 }
 
-// ── ユーティリティ ────────────────────────────────
 function createSeededRandom(seed) {
   let value = (Number(seed) >>> 0) || 0x6d2b79f5;
   return () => {
@@ -79,19 +71,27 @@ function createDeck(random = Math.random) {
   return shuffle(deck, random);
 }
 
-function drawSafe(count, currentDeck, currentDiscard, road = null, excludePositions = [], random = Math.random) {
+function drawSafe(count, currentDeck, currentDiscard, road = null, random = Math.random) {
   let d = [...currentDeck];
   let disc = [...currentDiscard];
   let newRoad = road ? road.map(arr => [...arr]) : null;
   const drawn = [];
+
   for (let i = 0; i < count; i++) {
     if (d.length === 0) {
-      if (disc.length > 0) { d = shuffle(disc, random); disc = []; }
-      else if (newRoad) {
+      if (disc.length > 0) {
+        d = shuffle(disc, random);
+        disc = [];
+      } else if (newRoad) {
         const recycled = [];
-        const excludeMarkets = excludePositions.map(getMarketIndex);
-        newRoad.forEach((arr, mPos) => { if (!excludeMarkets.includes(mPos) && arr.length > 0) { recycled.push(...arr); newRoad[mPos] = []; } });
-        if (recycled.length > 0) d = shuffle(recycled, random); else break;
+        newRoad.forEach((arr, pos) => {
+          if (arr.length > 0) {
+            recycled.push(...arr);
+            newRoad[pos] = [];
+          }
+        });
+        if (recycled.length > 0) d = shuffle(recycled, random);
+        else break;
       } else break;
     }
     if (d.length > 0) drawn.push(d.shift());
@@ -104,12 +104,15 @@ function evalSet(cards) {
   const types = cards.map(c => c.type);
   const nums = cards.map(c => c.num).sort((a, b) => a - b);
   const baseSalt = cards.reduce((s, c) => s + c.salt, 0);
+
   if (types[0] === types[1] && types[1] === types[2]) {
     const t = types[0];
-    if (nums[0] === nums[1] && nums[1] === nums[2])
-      return { name: `${t} ${nums[0]}×3`, salt: baseSalt, isTriplet: true, cards, type: t };
-    if (nums[0] + 1 === nums[1] && nums[1] + 1 === nums[2])
-      return { name: `${t} ${nums[0]}-${nums[2]}`, salt: baseSalt, isTriplet: false, cards, type: t };
+    if (nums[0] === nums[1] && nums[1] === nums[2]) {
+      return { name: `${t} ${nums[0]}×3 (セット)`, salt: baseSalt, isTriplet: true, cards, type: t, nums };
+    }
+    if (nums[0] + 1 === nums[1] && nums[1] + 1 === nums[2]) {
+      return { name: `${t} ${nums[0]}-${nums[2]} (連番)`, salt: baseSalt, isTriplet: false, cards, type: t, nums };
+    }
   }
   return null;
 }
@@ -119,880 +122,822 @@ function findSets(hand) {
   if (!hand || hand.length < 3) return list;
   const n = hand.length;
   const seen = new Set();
-  for (let i = 0; i < n - 2; i++)
-    for (let j = i + 1; j < n - 1; j++)
+  for (let i = 0; i < n - 2; i++) {
+    for (let j = i + 1; j < n - 1; j++) {
       for (let k = j + 1; k < n; k++) {
         const trio = [hand[i], hand[j], hand[k]];
         const r = evalSet(trio);
-        if (r) { const pk = `${r.name}:${r.salt}`; if (!seen.has(pk)) { seen.add(pk); list.push({ trio, info: r }); } }
+        if (r) {
+          const pk = `${r.name}:${r.salt}`;
+          if (!seen.has(pk)) {
+            seen.add(pk);
+            list.push({ trio, info: r });
+          }
+        }
       }
+    }
+  }
   return list;
 }
 
-// 手札の発展性（ターツ・対子・同一色の枚数など）を評価
-function evaluateHandSynergy(hand) {
-  if (!hand || hand.length === 0) return 0;
+function evalCardPotential(card, hand) {
   let score = 0;
-  const byType = {};
-  hand.forEach(c => {
-    if (!byType[c.type]) byType[c.type] = [];
-    byType[c.type].push(c.num);
-  });
-
-  Object.values(byType).forEach(nums => {
-    if (nums.length >= 2) {
-      score += nums.length * 15;
-      nums.sort((a, b) => a - b);
-      for (let i = 0; i < nums.length - 1; i++) {
-        const diff = nums[i + 1] - nums[i];
-        if (diff === 0) score += 35;       // 対子
-        else if (diff === 1) score += 40;  // 両面/連続
-        else if (diff === 2) score += 20;  // カンチャン
+  for (const other of hand) {
+    if (other.id === card.id) continue;
+    if (other.type === card.type) {
+      const diff = Math.abs(other.num - card.num);
+      if (diff === 0) {
+        score += 30;
+      } else if (diff === 1) {
+        score += 24;
+      } else if (diff === 2) {
+        score += 12;
+      } else {
+        score += 4;
       }
     }
-  });
+  }
   return score;
 }
 
-function getCardDiscardPriorities(hand) {
+function hasReadyPair(hand) {
+  if (!hand || hand.length < 2) return false;
+  for (let i = 0; i < hand.length; i++) {
+    for (let j = i + 1; j < hand.length; j++) {
+      if (hand[i].type === hand[j].type) {
+        const diff = Math.abs(hand[i].num - hand[j].num);
+        if (diff === 0 || diff === 1) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getCardPriorities(hand) {
   if (!hand || hand.length === 0) return [];
   const currentSets = findSets(hand);
-  const currentBestValue = currentSets.length > 0 ? Math.max(...currentSets.map(s => s.info.salt)) : 0;
-  const currentSynergy = evaluateHandSynergy(hand);
+  const currentBestValue = currentSets.length > 0 ? Math.max(...currentSets.map(s => s.info.salt + (s.info.isTriplet ? SET_BONUS : 0))) : 0;
 
   return hand.map((card, idx) => {
     const rem = hand.filter((_, i) => i !== idx);
     const ns = findSets(rem);
-    const nv = ns.length > 0 ? Math.max(...ns.map(s => s.info.salt)) : 0;
-    const nSynergy = evaluateHandSynergy(rem);
-    const setLoss = (currentBestValue - nv) * 50;
-    const synLoss = (currentSynergy - nSynergy);
-    return { card, idx, loss: setLoss + synLoss };
+    const nv = ns.length > 0 ? Math.max(...ns.map(s => s.info.salt + (s.info.isTriplet ? SET_BONUS : 0))) : 0;
+    const loss = (currentBestValue - nv) * 100;
+    const potential = evalCardPotential(card, rem);
+    return { card, idx, loss: loss + potential };
   }).sort((a, b) => a.loss - b.loss);
+}
+
+function pickBestMarketCard(marketCards, hand) {
+  if (!marketCards || marketCards.length === 0) return null;
+  let bestCard = marketCards[0];
+  let bestScore = -999;
+
+  marketCards.forEach(card => {
+    const testSets = findSets([...hand, card]);
+    let score = 0;
+    if (testSets.length > 0) {
+      const maxSalt = Math.max(...testSets.map(s => s.info.salt + (s.info.isTriplet ? SET_BONUS : 0)));
+      score = 200 + maxSalt * 10;
+    } else {
+      score = evalCardPotential(card, hand);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestCard = card;
+    }
+  });
+
+  return bestCard;
+}
+
+function getPlayerBoxSalt(player) {
+  if (!player || !player.boxes) return 0;
+  return player.boxes.reduce((sum, b) => sum + (b.salt || 0), 0);
+}
+
+function deductBoxSalt(player, cost) {
+  const total = getPlayerBoxSalt(player);
+  if (total < cost) return { newBoxes: player.boxes, success: false };
+
+  let remaining = cost;
+  const newBoxes = player.boxes.map(b => {
+    if (remaining > 0 && b.salt > 0) {
+      if (b.salt >= remaining) {
+        const updated = b.salt - remaining;
+        remaining = 0;
+        return { ...b, salt: updated };
+      } else {
+        remaining -= b.salt;
+        return { ...b, salt: 0 };
+      }
+    }
+    return b;
+  });
+
+  return { newBoxes, success: true };
 }
 
 // ── 4大戦略 ──────────────────────────────────────
 const STRATEGIES = {
   adaptive: {
-    name: '適応型 (Adaptive)',
-    shouldBuyBox:  c => c.boxes.filter(b => b.unlocked).length < 3 && c.score < WIN_SCORE - 3,
-    shouldFlipBox: c => c.score < WIN_SCORE - 2,
-    getKeepAmount: c => {
-      const u = c.boxes.filter(b => b.unlocked).length;
-      if (c.score + (c.boxes.reduce((s, b) => s + (b.salt || 0), 0) + c.pouchSalt) >= WIN_SCORE) return 0;
-      if (u < 3 && c.score < WIN_SCORE - 3) return BOX_COSTS[u - 1];
-      if (c.boxes.find(b => b.unlocked && !b.flipped) && c.score < WIN_SCORE - 2) return FLIP_COST;
-      return 0;
-    }
+    name: '適応商人 (Adaptive)',
+    upgradePreference: 1.0,
+    wholesalePreference: 1.0
   },
-  moreBoxes: {
-    name: '荷箱増設特化 (More Boxes)',
-    shouldBuyBox:  c => c.boxes.filter(b => b.unlocked).length < 4 && c.score < WIN_SCORE - 2,
-    shouldFlipBox: c => c.boxes.filter(b => b.unlocked).length >= 2 && c.score < WIN_SCORE - 2,
-    getKeepAmount: c => {
-      const u = c.boxes.filter(b => b.unlocked).length;
-      if (c.score + (c.boxes.reduce((s, b) => s + (b.salt || 0), 0) + c.pouchSalt) >= WIN_SCORE) return 0;
-      if (u < 4 && c.score < WIN_SCORE - 2) return BOX_COSTS[u - 1];
-      return 0;
-    }
+  bigBox: {
+    name: '大箱特化 (Big Box)',
+    upgradePreference: 2.2,
+    wholesalePreference: 0.5
   },
-  qualityBoxes: {
-    name: '桐箱強化特化 (Quality Boxes)',
-    shouldBuyBox:  c => c.boxes.filter(b => b.unlocked).length < 2 && c.score < WIN_SCORE - 2,
-    shouldFlipBox: c => c.score < WIN_SCORE - 2,
-    getKeepAmount: c => {
-      if (c.score + (c.boxes.reduce((s, b) => s + (b.salt || 0), 0) + c.pouchSalt) >= WIN_SCORE) return 0;
-      if (c.boxes.find(b => b.unlocked && !b.flipped) && c.score < WIN_SCORE - 2) return FLIP_COST;
-      return 0;
-    }
+  wholesale: {
+    name: '問屋仕入れ (Wholesale)',
+    upgradePreference: 0.8,
+    wholesalePreference: 1.8
   },
-  fastShuttle: {
-    name: '快速便 (Fast Shuttle)',
-    shouldBuyBox:  () => false,
-    shouldFlipBox: () => false,
-    getKeepAmount: () => 0
+  fastFerry: {
+    name: '快速ピストン (Fast Ferry)',
+    upgradePreference: 0.0,
+    wholesalePreference: 0.0
   }
 };
 
-// ── 拡張シミュレーション (トラッキング付き) ──────
-function runTrackedMatch(stratKeys = ['adaptive', 'moreBoxes', 'qualityBoxes', 'fastShuttle'], random = Math.random) {
-  const d = createDeck(random);
-  const players = stratKeys.map((k, i) => {
-    return {
-      id: i, stratKey: k, strat: STRATEGIES[k],
-      // 実ゲームと同じ条件：全員が初期手札5枚。
-      pos: 0, hand: d.splice(0, HAND_LIMIT),
-      boxes: [
-        { unlocked: true,  flipped: false, cargo: null, salt: 0 },
-        { unlocked: false, flipped: false, cargo: null, salt: 0 },
-        { unlocked: false, flipped: false, cargo: null, salt: 0 },
-        { unlocked: false, flipped: false, cargo: null, salt: 0 }
-      ],
-      pouchSalt: 0, score: 0, refillLimit: 1
-    };
-  });
+// ── トラッキング付きマッチシミュレーション ──────
+function runTrackedMatch(stratKeys = ['adaptive', 'bigBox', 'wholesale', 'fastFerry'], random = Math.random, options = {}) {
+  let deck = createDeck(random);
+  let discard = [];
+  let road = Array(6).fill(null).map(() => [deck.shift()]);
 
-  const road = Array(6).fill(null).map(() => [d.shift()]);
-  const state = { deck: d, discard: [], road, players, turn: 0, gameOver: false, winner: null,
-    finalRoundTriggered: false  // 最終ラウンドフラグ
-  };
+  const players = stratKeys.map((k, i) => ({
+    id: i,
+    stratKey: k,
+    strat: STRATEGIES[k],
+    pos: 0,
+    hand: deck.splice(0, HAND_LIMIT),
+    boxes: [
+      { isBig: false, cargo: null, salt: 2 },
+      { isBig: false, cargo: null, salt: 0 }
+    ],
+    score: 0
+  }));
 
-  // ── トラッキングデータ ──
   const tracking = {
-    scoreHistory: players.map(() => [0]),  // [playerIdx][turnIdx] = score
+    scoreHistory: players.map(() => [0]),
     leadChanges: 0,
     lastLeader: -1,
-    dilemmaEvents: 0,           // 客観的ジレンマ（役破壊・利敵・投資分岐）の発生回数
-    viableOptionsCount: 0,      // 有効選択肢の累計
-    decisionTurns: 0,           // 意思決定手番の総数
-    cardContention: 0,          // マス上カードの奪い合い回数
-    pathCollisions: 0,          // 同じマスへの移動回数
+    dilemmaEvents: 0,
+    viableOptionsCount: 0,
+    decisionTurns: 0,
+    cardContention: 0,
+    pathCollisions: 0,
     setsFormed: players.map(() => 0),
     portVisits: players.map(() => 0),
     homeVisits: players.map(() => 0),
-    facilitySpendings: players.map(() => 0),
-    midpointLeader: null,
-    midpointRecorded: false,
+    bigBoxUpgrades: players.map(() => 0),
+    wholesaleUses: players.map(() => 0),
+    trendHits: players.map(() => 0)
   };
 
-  let turns = 0;
-  const maxTurns = 120;  // 最大30巡（正常決着を完全に保証）
+  let turn = 0;
+  let rounds = 0;
+  let finalRoundTriggered = false;
+  let gameOver = false;
+  const maxRounds = 80;
 
-  while (!state.gameOver && turns < maxTurns) {
-    const curr = state.players[state.turn];
-    const allPlayerPos = state.players.map(pl => pl.pos);
-    const currentRound = Math.floor(turns / 4) + 1;
+  while (!gameOver && rounds < maxRounds) {
+    const pIdx = turn % 4;
+    if (pIdx === 0) rounds++;
+    const p = players[pIdx];
+    const strat = p.strat;
+    const botSalt = getPlayerBoxSalt(p);
+    const hList = p.hand;
 
-    if (currentRound >= 3 && !tracking.midpointRecorded) {
-      tracking.midpointLeader = [...state.players].sort((a, b) => b.score - a.score)[0].id;
-      tracking.midpointRecorded = true;
-    }
+    if (hList.length > 0) {
+      tracking.decisionTurns++;
+      const priorities = getCardPriorities(hList);
+      let bestMoveIdx = 0;
+      let bestScore = -99999;
+      let secondBestScore = -99999;
 
-    if (curr.hand.length === 0) {
-      const res = drawSafe(HAND_LIMIT, state.deck, state.discard, state.road, allPlayerPos, random);
-      curr.hand = res.drawn; state.deck = res.newDeck; state.discard = res.newDiscard;
-      state.road = res.newRoad || state.road;
-      if (curr.hand.length === 0) { state.turn = (state.turn + 1) % 4; turns++; continue; }
-    }
+      const loadedBoxes = p.boxes.filter(b => b.cargo).length;
+      const smallBoxes = p.boxes.filter(b => !b.isBig).length;
 
-    // ── 意思決定分析（軸5: 悩ましさ）──
-    const priorities = getCardDiscardPriorities(curr.hand);
-    const totalSalt = curr.boxes.reduce((s, b) => s + (b.salt || 0), 0) + curr.pouchSalt;
-    const hasSalt = totalSalt > 0;
-    const loadedBoxes = curr.boxes.filter(b => b.unlocked && b.cargo).length;
-    const emptyBoxes = curr.boxes.filter(b => b.unlocked && !b.cargo && b.salt === 0).length;
-    const unflipped = curr.boxes.find(b => b.unlocked && !b.flipped);
-    const unlockedBoxes = curr.boxes.filter(b => b.unlocked);
+      hList.forEach((c, idx) => {
+        const nextPos = (p.pos + c.num) % 10;
+        const pInfo = priorities.find(item => item.idx === idx);
+        const loss = pInfo ? pInfo.loss : 50;
+        let score = 100 - loss;
 
-    const moveScores = [];
-    curr.hand.forEach((c, idx) => {
-      const pInfo = priorities.find(p => p.idx === idx);
-      const baseLoss = pInfo ? pInfo.loss : 20;
-      const target = (curr.pos + c.num) % 10;
-      const handAfterMove = curr.hand.filter((_, handIdx) => handIdx !== idx);
-      const setsAfterMove = findSets(handAfterMove).length;
-      let score = (50 - baseLoss * 0.5);
+        // 競合・相互作用の検出
+        const othersAtNext = players.filter(pl => pl.id !== p.id && pl.pos === nextPos).length;
+        if (othersAtNext > 0) tracking.pathCollisions += othersAtNext;
 
-      // 複数箱所持時の荷積み・面子準備
-      if (setsAfterMove > 0 && emptyBoxes > 0) {
-        score += setsAfterMove * 35;
-        if (emptyBoxes > 1) score += 20;
-      }
-
-      // 手札の発展性（シナジー）を評価に加味
-      const synAfterMove = evaluateHandSynergy(handAfterMove);
-      score += synAfterMove * 0.3;
-
-      // 施設や目的地ごとの評価（正規化スケール）
-      if (target === 0) {
-        // 地元
-        if (hasSalt) {
-          score += 70 + totalSalt * 12;
-          if (curr.score + totalSalt >= WIN_SCORE) score += 2000;
-        } else {
-          score -= 10;
-        }
-      } else if (target === PORT_TILE) {
-        // 港: 荷物を多く積んでいるほど高評価
-        if (loadedBoxes > 0) {
-          const flippedLoaded = curr.boxes.filter(b => b.unlocked && b.cargo && b.flipped).length;
-          score += 75 + loadedBoxes * 40 + flippedLoaded * 30;
-          if (emptyBoxes >= 2 && loadedBoxes === 1) score -= 35;
-          else if (emptyBoxes === 1 && loadedBoxes === 1) score -= 15;
-        } else {
-          score -= 15;
-        }
-      } else if (BOX_TILES.includes(target) && unlockedBoxes.length < 4) {
-        // 箱屋 (1, 9): 増設（箱が増えると補充枚数も増えるため極めて高価値）
-        const cost = BOX_COSTS[unlockedBoxes.length - 1];
-        if (curr.strat.shouldBuyBox(curr) && totalSalt >= cost) {
-          score += 100 + (4 - unlockedBoxes.length) * 15;
-        }
-      } else if (GUILD_TILES.includes(target) && unflipped) {
-        // 会所 (3, 7): 高級箱化
-        if (curr.strat.shouldFlipBox(curr) && totalSalt >= FLIP_COST) {
-          score += 90;
-        }
-      }
-
-      // 街道・場札回収（空き箱が多いときはカード集めの価値が高い）
-      const roadCards = state.road[getMarketIndex(target)] || [];
-      if (roadCards.length > 0) {
-        score += roadCards.length * (emptyBoxes > 1 ? 15 : (emptyBoxes > 0 ? 10 : 4));
-      }
-
-      // 港への進行 / 地元への進行
-      if (loadedBoxes > 0 && !hasSalt) {
-        const distToPort = (PORT_TILE - target + 10) % 10;
-        if (target <= PORT_TILE) {
-          const progressWeight = (emptyBoxes > 0 ? 4 : 10);
-          score += (5 - distToPort) * (progressWeight + loadedBoxes * 3);
-        }
-      }
-      if (hasSalt) {
-        const distToHome = (10 - target) % 10;
-        if (target >= PORT_TILE || target === 0) {
-          score += (10 - distToHome) * 6;
-        }
-      }
-
-      moveScores.push(score);
-    });
-
-    // 最良手を選択
-    let bestScore = -99999, bestIdx = 0;
-    moveScores.forEach((score, idx) => { if (score > bestScore) { bestScore = score; bestIdx = idx; } });
-
-    const chosenCard = curr.hand[bestIdx] || curr.hand[0];
-    const nextPos = (curr.pos + chosenCard.num) % 10;
-
-    // ── 客観的ジレンマ（悩ましさ）の検出 ──
-    let dilemmaCountThisTurn = 0;
-
-    // ① 役破壊ジレンマ: 重要目的地(港・地元・会所・箱屋)に行けるカードが、役パーツまたは手札のキーカードである
-    const currentSets = findSets(curr.hand);
-    const keyCardIds = new Set();
-    currentSets.forEach(s => s.trio.forEach(c => keyCardIds.add(c.id)));
-    
-    curr.hand.forEach((c, idx) => {
-      const target = (curr.pos + c.num) % 10;
-      const isKeyFacility = (target === PORT_TILE && loadedBoxes > 0) || 
-                            (target === 0 && hasSalt) || 
-                            (GUILD_TILES.includes(target) && unflipped && totalSalt >= FLIP_COST) ||
-                            (BOX_TILES.includes(target) && unlockedBoxes.length < 4 && totalSalt >= (BOX_COSTS[unlockedBoxes.length - 1] || 1));
-      if (isKeyFacility && keyCardIds.has(c.id)) {
-        dilemmaCountThisTurn += 1;
-      }
-    });
-
-    // ② 利敵放出ジレンマ: 出そうとしているカードが高得点牌(1, 5)で、直後のプレイヤーが拾える位置にある
-    if (chosenCard.salt >= 2) {
-      const nextPlayer = state.players[(state.turn + 1) % 4];
-      const canNextPick = (curr.pos === nextPlayer.pos) || ((nextPlayer.pos + chosenCard.num) % 10 === curr.pos);
-      if (canNextPick) dilemmaCountThisTurn += 1;
-    }
-
-    // ③ 投資分岐ジレンマ: 会所(2塩)と箱屋(1~3塩)の両方が可能な資金を持っている
-    if (totalSalt >= 2 && unflipped && unlockedBoxes.length < 4) {
-      dilemmaCountThisTurn += 1;
-    }
-
-    tracking.dilemmaEvents += dilemmaCountThisTurn;
-
-    // 有効選択肢数 (手札から選べる移動先のうち、何らかの明確なメリットがある手の数)
-    const viableOptions = moveScores.filter(s => s > 30).length;
-    tracking.viableOptionsCount += viableOptions;
-    tracking.decisionTurns += 1;
-
-    // 相互作用: 目的地に他プレイヤーがいたらカウント
-    const othersAtDest = state.players.filter((pl, i) => i !== state.turn && pl.pos === nextPos);
-    if (othersAtDest.length > 0) tracking.pathCollisions++;
-
-    // カード争奪: マスが属する市場にカードがあり、他プレイヤーもそこを狙えたか
-    const nextMarketIdx = getMarketIndex(nextPos);
-    const currMarketIdx = getMarketIndex(curr.pos);
-    const roadCardsAtDestPre = state.road[nextMarketIdx] || [];
-    if (roadCardsAtDestPre.length > 0) {
-      state.players.forEach((pl, i) => {
-        if (i !== state.turn && pl.hand.some(c => getMarketIndex((pl.pos + c.num) % 10) === nextMarketIdx)) {
-          tracking.cardContention++;
-        }
-      });
-    }
-
-    // 移動実行: 出発したマスが属する市場にカードを表向きで配置！
-    const tempRoad = state.road.map((arr, i) => i === currMarketIdx ? [...arr, chosenCard] : arr);
-    let hnd = curr.hand.filter((_, idx) => idx !== bestIdx);
-    let newDeck = state.deck, newDiscard = state.discard, newRoad = tempRoad;
-
-    // 補充：着地したマスが属する市場から補充！（上限＝所持箱数）
-    let refillCount = 0;
-    const maxRefill = curr.boxes.filter(b => b.unlocked).length;
-    while (refillCount < maxRefill) {
-      const roadCardsAtDest = newRoad[nextMarketIdx] || [];
-      const currentHandSets = findSets(hnd);
-      const currentHandSynergy = evaluateHandSynergy(hnd);
-
-      const fieldPick = roadCardsAtDest.reduce((best, card) => {
-        const candidateSets = findSets([...hnd, card]);
-        const candidateSynergy = evaluateHandSynergy([...hnd, card]);
-        let val = 0;
-        if (candidateSets.length > currentHandSets.length) {
-          val = 100 + Math.max(...candidateSets.map(s => s.info.salt));
-        } else if (candidateSynergy > currentHandSynergy) {
-          val = 30 + (candidateSynergy - currentHandSynergy);
-        }
-        return val > best.value ? { card, value: val } : best;
-      }, { card: null, value: -1 });
-
-      const emptyBoxSlots = curr.boxes.filter(b => b.unlocked && !b.cargo && b.salt === 0).length;
-      if (refillCount > 0 && findSets(hnd).length >= Math.max(1, emptyBoxSlots) && hnd.length >= HAND_LIMIT) break;
-
-      if (fieldPick.card && fieldPick.value >= 30) {
-        hnd = [...hnd, fieldPick.card];
-        newRoad = newRoad.map((arr, i) => i === nextMarketIdx
-          ? arr.filter(card => card.id !== fieldPick.card.id)
-          : arr);
-      } else {
-        const res = drawSafe(1, newDeck, newDiscard, newRoad, [...allPlayerPos, nextPos], random);
-        if (res.drawn.length === 0) break;
-        hnd = [...hnd, ...res.drawn];
-        newDeck = res.newDeck; newDiscard = res.newDiscard;
-        newRoad = res.newRoad || newRoad;
-      }
-      refillCount++;
-    }
-
-    curr.pos = nextPos;
-    curr.hand = hnd;
-    state.deck = newDeck; state.discard = newDiscard; state.road = newRoad;
-
-    // パッキング (高級箱には高い役、木箱には安い役を優先配置)
-    let bxs = [...curr.boxes];
-    let refillLimit = curr.refillLimit || 1;
-    while (true) {
-      const sets = findSets(curr.hand);
-      const emptyIdxs = bxs
-        .map((b, idx) => (b.unlocked && !b.cargo && b.salt === 0 ? idx : -1))
-        .filter(idx => idx !== -1);
-
-      if (sets.length > 0 && emptyIdxs.length > 0) {
-        // 高級箱が空いているなら最高素点の役を選び、木箱だけなら手頃な役から詰める
-        const hasEmptyFlipped = emptyIdxs.some(idx => bxs[idx].flipped);
-        let s;
-        if (hasEmptyFlipped) {
-          // 最高素点の役を選択
-          s = [...sets].sort((a, b) => b.info.salt - a.info.salt)[0];
-          // 高級箱を優先して充填
-          const targetBoxIdx = emptyIdxs.find(idx => bxs[idx].flipped) ?? emptyIdxs[0];
-          bxs[targetBoxIdx] = { ...bxs[targetBoxIdx], cargo: { ...s.info, cards: s.trio } };
-        } else {
-          // 木箱用には役の中から選択
-          s = sets[0];
-          const targetBoxIdx = emptyIdxs[0];
-          bxs[targetBoxIdx] = { ...bxs[targetBoxIdx], cargo: { ...s.info, cards: s.trio } };
-        }
-
-        const ids = s.trio.map(c => c.id);
-        curr.hand = curr.hand.filter(c => !ids.includes(c.id));
-        tracking.setsFormed[state.turn]++;
-        // 荷積み直後の3枚補充（現在地市場または山札から1枚ずつ選んで補充）
-        const currMarketIdx = getMarketIndex(curr.pos);
-        for (let r = 0; r < 3; r++) {
-          const roadCardsAtDest = state.road[currMarketIdx] || [];
-          const currentHandSets = findSets(curr.hand);
-          const currentHandSynergy = evaluateHandSynergy(curr.hand);
-
-          const fieldPick = roadCardsAtDest.reduce((best, card) => {
-            const candidateSets = findSets([...curr.hand, card]);
-            const candidateSynergy = evaluateHandSynergy([...curr.hand, card]);
-            let val = 0;
-            if (candidateSets.length > currentHandSets.length) {
-              val = 100 + Math.max(...candidateSets.map(s => s.info.salt));
-            } else if (candidateSynergy > currentHandSynergy) {
-              val = 30 + (candidateSynergy - currentHandSynergy);
+        if (nextPos === 0) {
+          if (botSalt > 0) {
+            score += 550 + botSalt * 90;
+            if (p.stratKey === 'fastFerry') score += 350;
+            if (p.score + botSalt >= WIN_SCORE) score += 50000;
+          } else score -= 100;
+        } else if (nextPos === 5) {
+          if (loadedBoxes > 0) {
+            score += 650 + loadedBoxes * 350;
+            if (p.stratKey === 'fastFerry') {
+              score += 400;
+            } else if (loadedBoxes === 2) {
+              score += 300;
+            } else if (loadedBoxes === 1 && p.stratKey === 'adaptive') {
+              // バランス型: 手札にリーチがあるなら問屋経由で2箱目を狙う、バラバラなら即出荷
+              const hasPair = hasReadyPair(hList);
+              const opponentUrgent = players.some(pl => pl.id !== p.id && (pl.score + getPlayerBoxSalt(pl) >= 16));
+              if (opponentUrgent || !hasPair) score += 200; // レース切迫または手札悪なら急ぎ出荷
+              else score -= 150; // もう1箱待つ余裕がある
             }
-            return val > best.value ? { card, value: val } : best;
-          }, { card: null, value: -1 });
-
-          if (fieldPick.card && fieldPick.value >= 30) {
-            curr.hand = [...curr.hand, fieldPick.card];
-            state.road = state.road.map((arr, i) => i === currMarketIdx
-              ? arr.filter(card => card.id !== fieldPick.card.id)
-              : arr);
-          } else {
-            const res = drawSafe(1, state.deck, state.discard, state.road, allPlayerPos, random);
-            if (res.drawn.length === 0) break;
-            curr.hand = [...curr.hand, ...res.drawn];
-            state.deck = res.newDeck; state.discard = res.newDiscard;
-            state.road = res.newRoad || state.road;
+          } else score -= 180;
+        } else if (nextPos === 2 || nextPos === 8) {
+          const isNearWin = (p.score + botSalt >= WIN_SCORE);
+          const alreadyHasBig = p.boxes.some(b => b.isBig);
+          const isLateGame = (p.score + botSalt >= 14 && alreadyHasBig);
+          if (botSalt >= BIG_BOX_COST && smallBoxes > 0 && !isNearWin && !isLateGame && strat.upgradePreference > 0) {
+            score += 450 * strat.upgradePreference;
+          }
+        } else if (nextPos === 3 || nextPos === 7) {
+          const setsCount = findSets(hList).length;
+          const needCards = (hList.length < 5 || (setsCount < 2 && loadedBoxes < 2));
+          if (loadedBoxes === 2) score += 50;
+          else {
+            let pref = strat.wholesalePreference;
+            if (p.stratKey === 'adaptive' && loadedBoxes === 1) {
+              if (hasReadyPair(hList)) pref *= 1.4; // 1箱積載時、手札にペアがあれば問屋の価値上昇
+            }
+            score += (needCards ? 380 : 180) * pref;
           }
         }
-      } else break;
-    }
 
-    // 施設アクション
-    if (curr.pos === 0) {
-      tracking.homeVisits[state.turn]++;
-      const curTotSalt = bxs.reduce((sum, b) => sum + (b.salt || 0), 0) + curr.pouchSalt;
-      const keep = curr.strat.getKeepAmount(curr);
-
-      // 箱単位で「空にして納品する」か「塩を残して投資用に保持する」かを選択
-      // keepAmount（投資用に取り置く量）に達するまで箱を温存し、それ以外の箱は全額納品して空にする
-      let preservedSalt = 0;
-      bxs = bxs.map(b => {
-        if (b.unlocked && b.salt > 0) {
-          if (preservedSalt < keep && (curr.score + curTotSalt < WIN_SCORE)) {
-            // この箱の塩は温存（空にしない・投資用）
-            preservedSalt += b.salt;
-            return b;
-          } else {
-            // この箱の塩をすべて納品して箱を完全に空にする！
-            curr.score += b.salt;
-            return { ...b, salt: 0 };
-          }
+        if (p.stratKey === 'fastFerry') {
+          score += c.num * 15;
         }
-        return b;
+
+        const mIdx = getMarketIndex(nextPos);
+        const mCards = road[mIdx] || [];
+        score += mCards.length * 25;
+
+        if (score > bestScore) {
+          secondBestScore = bestScore;
+          bestScore = score;
+          bestMoveIdx = idx;
+        } else if (score > secondBestScore) {
+          secondBestScore = score;
+        }
       });
 
-      // pouchSalt（手持ち小銭）がある場合は得点化
-      if (curr.pouchSalt > 0) {
-        curr.score += curr.pouchSalt;
-        curr.pouchSalt = 0;
+      // 悩ましさの測定（最善手と次善手が接近している場合）
+      if (hList.length >= 2 && Math.abs(bestScore - secondBestScore) < 40) {
+        tracking.dilemmaEvents++;
       }
-    } else if (curr.pos === PORT_TILE) {
-      tracking.portVisits[state.turn]++;
-      let cargoCards = [];
-      bxs = bxs.map(b => {
-        if (b.unlocked && b.cargo) {
-          // 木箱: 素点そのまま / 高級箱(裏返し): 素点 + FLIP_BONUS！
-          const gain = b.cargo.salt + (b.flipped ? FLIP_BONUS : 0);
-          if (b.cargo.cards) cargoCards.push(...b.cargo.cards);
-          return { ...b, cargo: null, salt: gain };
-        }
-        return b;
-      });
+      tracking.viableOptionsCount += hList.length;
 
-      // 港町の流行判定 ＆ 即時山札シャッフル
-      if (cargoCards.length > 0) {
-        let curDeck = state.deck;
-        let disc = state.discard;
-        if (curDeck.length === 0 && disc.length > 0) {
-          curDeck = shuffle(disc, random);
-          disc = [];
-        }
-        let cardsToRecycle = [...cargoCards];
-        if (curDeck.length > 0) {
-          const trendCard = curDeck.shift();
-          const matches = curr.hand.filter(c => c.type === trendCard.type && c.num === trendCard.num).length;
-          if (matches > 0) {
-            curr.score += matches;
-          }
-          cardsToRecycle.push(trendCard);
-        }
-        state.deck = shuffle([...curDeck, ...cardsToRecycle], random);
-        state.discard = disc;
+      const moveCard = hList[bestMoveIdx];
+      const oldPos = p.pos;
+      const nextPos = (oldPos + moveCard.num) % 10;
+      const passedHome = (oldPos + moveCard.num >= 10);
+
+      let newHand = hList.filter((_, idx) => idx !== bestMoveIdx);
+      const originMarket = getMarketIndex(oldPos);
+      road[originMarket].push(moveCard);
+
+      // Step 1: 補充
+      const destMarket = getMarketIndex(nextPos);
+      const mCards = road[destMarket] || [];
+      if (mCards.length > 0) {
+        const picked = pickBestMarketCard(mCards, newHand);
+        newHand.push(picked);
+        road[destMarket] = road[destMarket].filter(c => c.id !== picked.id);
+        tracking.cardContention++;
+      } else {
+        const res = drawSafe(1, deck, discard, road, random);
+        deck = res.newDeck;
+        discard = res.newDiscard;
+        road = res.newRoad || road;
+        newHand.push(...res.drawn);
       }
-    } else if (GUILD_TILES.includes(curr.pos)) {
-      const unflippedIdx = bxs.findIndex(b => b.unlocked && !b.flipped);
-      const curTot = bxs.reduce((sum, b) => sum + (b.salt || 0), 0) + curr.pouchSalt;
-      if (unflippedIdx !== -1 && curr.strat.shouldFlipBox(curr) && curTot >= FLIP_COST) {
-        tracking.facilitySpendings[state.turn] += FLIP_COST;
-        let needed = FLIP_COST;
-        if (curr.pouchSalt >= needed) { curr.pouchSalt -= needed; needed = 0; }
-        else { needed -= curr.pouchSalt; curr.pouchSalt = 0; }
-        bxs = bxs.map(b => {
-          if (needed > 0 && b.unlocked && b.salt > 0) {
-            if (b.salt >= needed) { const rem = b.salt - needed; needed = 0; return { ...b, salt: rem }; }
-            else { needed -= b.salt; return { ...b, salt: 0 }; }
-          }
-          return b;
-        });
-        bxs[unflippedIdx] = { ...bxs[unflippedIdx], flipped: true };
+
+      // Step 1: 地元通過手札整理
+      if (passedHome && newHand.length > 5) {
+        const excess = newHand.length - 5;
+        const pri = getCardPriorities(newHand);
+        const discardIds = pri.slice(0, excess).map(item => item.card.id);
+        const discarded = newHand.filter(c => discardIds.includes(c.id));
+        newHand = newHand.filter(c => !discardIds.includes(c.id));
+        discard.push(...discarded);
       }
-    } else if (BOX_TILES.includes(curr.pos)) {
-      const unlockedCount = bxs.filter(b => b.unlocked).length;
-      if (unlockedCount < 4) {
-        const nextCost = BOX_COSTS[unlockedCount - 1];
-        const curTot = bxs.reduce((sum, b) => sum + (b.salt || 0), 0) + curr.pouchSalt;
-        const wantsBox = curr.strat.shouldBuyBox ? curr.strat.shouldBuyBox(curr) : true;
-        if (curTot >= nextCost && wantsBox) {
-          tracking.facilitySpendings[state.turn] += nextCost;
-          const target = bxs.find(b => !b.unlocked);
-          if (target) {
-            target.unlocked = true;
-            let needed = nextCost;
-            if (curr.pouchSalt >= needed) { curr.pouchSalt -= needed; needed = 0; }
-            else { needed -= curr.pouchSalt; curr.pouchSalt = 0; }
-            bxs = bxs.map(b => {
-              if (needed > 0 && b.unlocked && b.salt > 0) {
-                if (b.salt >= needed) { const rem = b.salt - needed; needed = 0; return { ...b, salt: rem }; }
-                needed -= b.salt;
-                return { ...b, salt: 0 };
+
+      // Step 2: 荷積み
+      let setsInHand = findSets(newHand);
+      while (setsInHand.length > 0 && p.boxes.some(b => !b.cargo && b.salt === 0)) {
+        const emptyBigIdx = p.boxes.findIndex(b => b.isBig && !b.cargo && b.salt === 0);
+        const emptyIdx = emptyBigIdx !== -1 ? emptyBigIdx : p.boxes.findIndex(b => !b.cargo && b.salt === 0);
+
+        setsInHand.sort((a, b) => (b.info.salt + (b.info.isTriplet ? SET_BONUS : 0)) - (a.info.salt + (a.info.isTriplet ? SET_BONUS : 0)));
+        const targetSet = setsInHand[0];
+        const trioIds = targetSet.trio.map(c => c.id);
+        newHand = newHand.filter(c => !trioIds.includes(c.id));
+        p.boxes[emptyIdx] = { ...p.boxes[emptyIdx], cargo: targetSet.info };
+        tracking.setsFormed[p.id]++;
+
+        // 3枚補充
+        for (let r = 0; r < 3; r++) {
+          const curMarketCards = road[destMarket] || [];
+          if (curMarketCards.length > 0) {
+            const picked = pickBestMarketCard(curMarketCards, newHand);
+            newHand.push(picked);
+            road[destMarket] = road[destMarket].filter(c => c.id !== picked.id);
+          } else {
+            const res = drawSafe(1, deck, discard, road, random);
+            deck = res.newDeck;
+            discard = res.newDiscard;
+            road = res.newRoad || road;
+            newHand.push(...res.drawn);
+          }
+        }
+        setsInHand = findSets(newHand);
+      }
+
+      // Step 2: 施設利用
+      if (nextPos === 0) {
+        tracking.homeVisits[p.id]++;
+        const s = getPlayerBoxSalt(p);
+        if (s > 0) {
+          p.score += s;
+          p.boxes = p.boxes.map(b => ({ ...b, salt: 0 }));
+        }
+      } else if (nextPos === 2 || nextPos === 8) {
+        const curBoxSalt = getPlayerBoxSalt(p);
+        const smallIdx = p.boxes.findIndex(b => !b.isBig);
+        const isNearWin = (p.score + curBoxSalt >= WIN_SCORE);
+        const alreadyHasBig = p.boxes.some(b => b.isBig);
+        const isLateGame = (p.score + curBoxSalt >= 14 && alreadyHasBig);
+        if (curBoxSalt >= BIG_BOX_COST && smallIdx !== -1 && strat.upgradePreference > 0.3 && !isNearWin && !isLateGame) {
+          const res = deductBoxSalt(p, BIG_BOX_COST);
+          if (res.success) {
+            p.boxes = res.newBoxes;
+            p.boxes[smallIdx] = { ...p.boxes[smallIdx], isBig: true };
+            tracking.bigBoxUpgrades[p.id]++;
+          }
+        }
+      } else if (nextPos === 3 || nextPos === 7) {
+        tracking.wholesaleUses[p.id]++;
+        let extraCards = 0;
+        const curBoxSalt = getPlayerBoxSalt(p);
+        const isNearWin = (p.score + curBoxSalt >= WIN_SCORE);
+        const setsCount = findSets(newHand).length;
+        const hasBigBox = p.boxes.some(b => b.isBig);
+        const shouldBuyExtra = (strat.wholesalePreference >= 1.5 && (curBoxSalt >= 3 || (hasBigBox && curBoxSalt >= 1)) && !isNearWin && setsCount === 0 && newHand.length <= 4);
+        if (shouldBuyExtra) {
+          const res = deductBoxSalt(p, 1);
+          if (res.success) {
+            p.boxes = res.newBoxes;
+            extraCards = 1;
+          }
+        }
+        const totalCards = 1 + extraCards;
+        for (let k = 0; k < totalCards; k++) {
+          const curMarketCards = road[destMarket] || [];
+          if (curMarketCards.length > 0) {
+            const picked = pickBestMarketCard(curMarketCards, newHand);
+            newHand.push(picked);
+            road[destMarket] = road[destMarket].filter(c => c.id !== picked.id);
+          } else {
+            const res = drawSafe(1, deck, discard, road, random);
+            deck = res.newDeck;
+            discard = res.newDiscard;
+            road = res.newRoad || road;
+            newHand.push(...res.drawn);
+          }
+        }
+
+        // 問屋で仕入れた直後の荷積み判定（ルール上、荷積みと施設利用は任意順序）
+        let afterWholesaleSets = findSets(newHand);
+        while (afterWholesaleSets.length > 0 && p.boxes.some(b => !b.cargo && b.salt === 0)) {
+          const emptyBigIdx = p.boxes.findIndex(b => b.isBig && !b.cargo && b.salt === 0);
+          const emptyIdx = emptyBigIdx !== -1 ? emptyBigIdx : p.boxes.findIndex(b => !b.cargo && b.salt === 0);
+          afterWholesaleSets.sort((a, b) => (b.info.salt + (b.info.isTriplet ? SET_BONUS : 0)) - (a.info.salt + (a.info.isTriplet ? SET_BONUS : 0)));
+          const targetSet = afterWholesaleSets[0];
+          const trioIds = targetSet.trio.map(c => c.id);
+          newHand = newHand.filter(c => !trioIds.includes(c.id));
+          p.boxes[emptyIdx] = { ...p.boxes[emptyIdx], cargo: targetSet.info };
+          tracking.setsFormed[p.id]++;
+          for (let r = 0; r < 3; r++) {
+            const curMarketCards = road[destMarket] || [];
+            if (curMarketCards.length > 0) {
+              const picked = pickBestMarketCard(curMarketCards, newHand);
+              newHand.push(picked);
+              road[destMarket] = road[destMarket].filter(c => c.id !== picked.id);
+            } else {
+              const res = drawSafe(1, deck, discard, road, random);
+              deck = res.newDeck;
+              discard = res.newDiscard;
+              road = res.newRoad || road;
+              newHand.push(...res.drawn);
+            }
+          }
+          afterWholesaleSets = findSets(newHand);
+        }
+      } else if (nextPos === 5) {
+        tracking.portVisits[p.id]++;
+        const boxesToSell = p.boxes.filter(b => b.cargo);
+        if (boxesToSell.length > 0) {
+          const shippedNums = [];
+          const discardedCards = [];
+          boxesToSell.forEach(b => {
+            if (b.cargo.nums) shippedNums.push(...b.cargo.nums);
+            if (b.cargo.cards) discardedCards.push(...b.cargo.cards);
+          });
+          discard.push(...discardedCards);
+
+          if (deck.length === 0 && discard.length > 0) {
+            deck = shuffle(discard, random);
+            discard = [];
+          }
+          let trendHit = false;
+          if (deck.length > 0) {
+            const tCard = deck.shift();
+            discard.push(tCard);
+            trendHit = shippedNums.includes(tCard.num);
+            if (trendHit) tracking.trendHits[p.id]++;
+          }
+
+          let trendAwarded = false;
+          p.boxes = p.boxes.map(b => {
+            if (b.cargo) {
+              let gain = b.cargo.salt;
+              if (b.cargo.isTriplet) gain += SET_BONUS;
+              if (b.isBig) gain += BIG_BOX_BONUS;
+              if (trendHit && !trendAwarded) {
+                gain += TREND_BONUS;
+                trendAwarded = true;
               }
-              return b;
-            });
-          }
+              return { ...b, cargo: null, salt: (b.salt || 0) + gain };
+            }
+            return b;
+          });
         }
       }
+
+      p.pos = nextPos;
+      p.hand = newHand;
+
+      if (p.score >= WIN_SCORE) finalRoundTriggered = true;
     }
 
-    // 手番の最後に手札を5枚以下へ整理し、余りは現在地の市場に戻す。
-    if (curr.hand.length > HAND_LIMIT) {
-      const excess = curr.hand.length - HAND_LIMIT;
-      const priorities = getCardDiscardPriorities(curr.hand);
-      const returnIds = priorities.slice(0, excess).map(item => item.card.id);
-      const toReturn = curr.hand.filter(card => returnIds.includes(card.id));
-      curr.hand = curr.hand.filter(card => !returnIds.includes(card.id));
-      const currMarket = getMarketIndex(curr.pos);
-      state.road = state.road.map((arr, i) => i === currMarket ? [...arr, ...toReturn] : arr);
-    }
-
-    curr.boxes = bxs;
-    curr.refillLimit = bxs.filter(b => b.unlocked).length;
-
-    // スコア履歴とリードチェンジ
-    state.players.forEach((pl, i) => { tracking.scoreHistory[i].push(pl.score); });
-    const currentLeader = [...state.players].sort((a, b) => b.score - a.score)[0].id;
-    if (tracking.lastLeader !== -1 && currentLeader !== tracking.lastLeader) {
+    // スコア推移とリーダーチェンジのトラッキング
+    players.forEach(pl => tracking.scoreHistory[pl.id].push(pl.score));
+    const currentScores = players.map(pl => pl.score);
+    const maxScore = Math.max(...currentScores);
+    const currentLeader = currentScores.indexOf(maxScore);
+    if (tracking.lastLeader !== -1 && currentLeader !== tracking.lastLeader && maxScore > 0) {
       tracking.leadChanges++;
     }
     tracking.lastLeader = currentLeader;
 
-    if (curr.score >= WIN_SCORE && !state.finalRoundTriggered) {
-      state.finalRoundTriggered = true;
+    turn++;
+    if (options.suddenDeath && finalRoundTriggered) {
+      gameOver = true;
+    } else if (finalRoundTriggered && (turn % 4 === 0)) {
+      gameOver = true;
     }
-
-    // 最終ラウンド制: ラウンドの最後(P4の手番後)まで回す
-    const nextTurn = (state.turn + 1) % 4;
-    if (state.finalRoundTriggered && nextTurn === 0) {
-      state.gameOver = true;
-      state.winners = state.players.filter(player => player.score === Math.max(...state.players.map(p => p.score)));
-      state.winner = state.winners[0];
-      break;
-    }
-
-    state.turn = nextTurn;
-    turns++;
   }
 
-  const winner = state.winner || state.players.reduce((p, c) => c.score > p.score ? c : p, state.players[0]);
+  // 最終精算
+  const finalResults = players.map(pl => {
+    const remSalt = getPlayerBoxSalt(pl);
+    const saltBonus = Math.floor(remSalt / 2);
+    const totalScore = pl.score + saltBonus;
+    const potentialScore = pl.score + remSalt; // 木箱の塩を満額換金できていたら何点だったか
+    const distToHome = (10 - pl.pos) % 10;
+    return { ...pl, remSalt, saltBonus, totalScore, potentialScore, distToHome };
+  });
+
+  const sorted = [...finalResults].sort((a, b) => b.totalScore - a.totalScore);
+  const topScore = sorted[0].totalScore;
+  const winners = sorted.filter(p => p.totalScore === topScore);
+  const runnerUp = sorted[1];
+
+  const rawMargin = runnerUp ? (topScore - runnerUp.totalScore) : 0;
+  const potentialMargin = runnerUp ? Math.max(0, topScore - runnerUp.potentialScore) : 0;
+  const isCloseByScore = runnerUp && (rawMargin <= 2);
+  const isCloseByPotential = runnerUp && (runnerUp.potentialScore >= 20 || potentialMargin <= 2);
+  const isCloseByDistance = runnerUp && runnerUp.remSalt > 0 && runnerUp.distToHome <= 3;
+  const isEffectiveClose = isCloseByScore || isCloseByPotential || isCloseByDistance;
+
   return {
-    totalRounds: Math.ceil(turns / 4),
-    winner,
-    winners: state.winners || [winner],
-    players: state.players,
-    reachCount: state.players.filter(pl => pl.score >= WIN_SCORE - 3).length,
+    rounds,
+    players: finalResults,
+    winners,
+    winnerStrat: winners[0].stratKey,
+    topScore,
+    margin1st2nd: rawMargin,
+    potentialMargin,
+    isEffectiveClose,
     tracking
   };
 }
 
-// ── 8軸評価関数 ──────────────────────────────────
+// ── 8軸評価計算 ──────────────────────────────────
 function evaluateAll(gameCount = 3000, options = {}) {
-  if (!Number.isInteger(gameCount) || gameCount <= 0) {
-    throw new Error(`gameCount must be a positive integer: ${gameCount}`);
-  }
-  const random = typeof options.random === 'function'
-    ? options.random
-    : options.seed === undefined ? Math.random : createSeededRandom(options.seed);
-  const silent = options.silent === true;
-  const originalConsoleLog = console.log;
+  const { seed, silent } = options;
+  const random = seed ? createSeededRandom(seed) : Math.random;
+  const startTime = Date.now();
+
+  const originalLog = console.log;
   if (silent) console.log = () => {};
-  const stratKeys = ['adaptive', 'moreBoxes', 'qualityBoxes', 'fastShuttle'];
-  const winCounts = { adaptive: 0, moreBoxes: 0, qualityBoxes: 0, fastShuttle: 0 };
-  const seatWins = [0, 0, 0, 0]; // 座順別勝利
+
+  const stratKeys = Object.keys(STRATEGIES);
+  const winCounts = { adaptive: 0, bigBox: 0, wholesale: 0, fastFerry: 0 };
+  const seatWins = [0, 0, 0, 0];
 
   let totalRounds = 0;
-  let totalMargin1_2 = 0;
-  let comebackWins = 0;
-  let simultaneousReaches = 0;
-  let totalFlippedBoxes = 0;
-  let totalUnlockedBoxes = 0;
+  let totalMargin = 0;
+  let totalPotentialMargin = 0;
   let totalLeadChanges = 0;
-  let totalDilemmaEvents = 0;
+  let totalDilemmas = 0;
   let totalViableOptions = 0;
   let totalDecisionTurns = 0;
   let totalCardContention = 0;
   let totalPathCollisions = 0;
+  let totalBigBoxes = 0;
   let totalSetsFormed = 0;
   let totalPortVisits = 0;
   let totalHomeVisits = 0;
+  let totalTrendHits = 0;
+
+  let comebackWins = 0;
+  let closeMatches = 0;
+  let effectiveCloseMatches = 0;
   const roundList = [];
-  const marginList = [];
 
-  const startTime = Date.now();
+  for (let i = 0; i < gameCount; i++) {
+    // 席順を均等にローテーション
+    const seatStrats = stratKeys.map((_, idx) => stratKeys[(idx + i) % stratKeys.length]);
+    const res = runTrackedMatch(seatStrats, random);
 
-  for (let g = 0; g < gameCount; g++) {
-    const shuffledStrats = shuffle(stratKeys, random);
-    const res = runTrackedMatch(shuffledStrats, random);
-    const t = res.tracking;
+    totalRounds += res.rounds;
+    roundList.push(res.rounds);
+    totalMargin += res.margin1st2nd;
+    totalPotentialMargin += res.potentialMargin;
+    if (res.margin1st2nd <= 2) closeMatches++;
+    if (res.isEffectiveClose) effectiveCloseMatches++;
 
-    const winners = res.winners || [res.winner];
-    const winShare = 1 / winners.length;
-    winners.forEach(winner => {
-      winCounts[winner.stratKey] += winShare;
-      seatWins[winner.id] += winShare;
+    res.winners.forEach(w => {
+      winCounts[w.stratKey] += 1 / res.winners.length;
+      seatWins[w.id] += 1 / res.winners.length;
     });
 
-    totalRounds += res.totalRounds;
-    roundList.push(res.totalRounds);
-
-    const sorted = [...res.players].sort((a, b) => b.score - a.score);
-    const margin = sorted[0].score - sorted[1].score;
-    totalMargin1_2 += margin;
-    marginList.push(margin);
-
-    if (t.midpointLeader !== null && !winners.some(winner => winner.id === t.midpointLeader)) comebackWins++;
-    if (res.reachCount >= 2) simultaneousReaches++;
+    const tr = res.tracking;
+    totalLeadChanges += tr.leadChanges;
+    totalDilemmas += tr.dilemmaEvents;
+    totalViableOptions += tr.viableOptionsCount;
+    totalDecisionTurns += tr.decisionTurns;
+    totalCardContention += tr.cardContention;
+    totalPathCollisions += tr.pathCollisions;
 
     res.players.forEach(pl => {
-      totalFlippedBoxes += pl.boxes.filter(b => b.unlocked && b.flipped).length;
-      totalUnlockedBoxes += pl.boxes.filter(b => b.unlocked).length;
+      totalBigBoxes += tr.bigBoxUpgrades[pl.id];
+      totalSetsFormed += tr.setsFormed[pl.id];
+      totalPortVisits += tr.portVisits[pl.id];
+      totalHomeVisits += tr.homeVisits[pl.id];
+      totalTrendHits += tr.trendHits[pl.id];
     });
 
-    totalLeadChanges += t.leadChanges;
-
-    totalDilemmaEvents += (t.dilemmaEvents || 0);
-    totalViableOptions += (t.viableOptionsCount || 0);
-    totalDecisionTurns += (t.decisionTurns || 1);
-
-    totalCardContention += t.cardContention;
-    totalPathCollisions += t.pathCollisions;
-
-    t.setsFormed.forEach(n => totalSetsFormed += n);
-    t.portVisits.forEach(n => totalPortVisits += n);
-    t.homeVisits.forEach(n => totalHomeVisits += n);
+    // 逆転勝利の判定（前半でトップでなかったプレイヤーの勝利）
+    const midIdx = Math.floor(tr.scoreHistory[0].length / 2);
+    if (midIdx > 0) {
+      const midScores = res.players.map(pl => tr.scoreHistory[pl.id][midIdx] || 0);
+      const midLeader = midScores.indexOf(Math.max(...midScores));
+      if (!res.winners.some(w => w.id === midLeader)) comebackWins++;
+    }
   }
 
-  const elapsed = (Date.now() - startTime) / 1000;
-
-  // ── 指標計算 ──
   const avgRounds = totalRounds / gameCount;
-  const avgMargin = totalMargin1_2 / gameCount;
+  const avgMargin = totalMargin / gameCount;
+  const avgPotentialMargin = totalPotentialMargin / gameCount;
   const comebackRate = (comebackWins / gameCount) * 100;
-  const simReachRate = (simultaneousReaches / gameCount) * 100;
-  const avgUnlockedBoxes = totalUnlockedBoxes / (gameCount * 4);
-  const avgFlippedBoxes = totalFlippedBoxes / (gameCount * 4);
-  const avgLeadChanges = totalLeadChanges / gameCount;
-  
-  // 客観的ジレンマ指標
-  const avgDilemmasPerGame = totalDilemmaEvents / gameCount;
-  const avgViableOptions = totalViableOptions / totalDecisionTurns;
+  const closeMatchRate = (closeMatches / gameCount) * 100;
+  const effectiveCloseRate = (effectiveCloseMatches / gameCount) * 100;
 
-  const avgCardContention = totalCardContention / gameCount;
-  const avgPathCollisions = totalPathCollisions / gameCount;
-  const avgSetsFormed = totalSetsFormed / (gameCount * 4);
-  const avgPortVisits = totalPortVisits / (gameCount * 4);
-  const avgHomeVisits = totalHomeVisits / (gameCount * 4);
-
-  const roundStdDev = Math.sqrt(roundList.reduce((acc, r) => acc + Math.pow(r - avgRounds, 2), 0) / gameCount);
+  const roundVariance = roundList.reduce((acc, r) => acc + Math.pow(r - avgRounds, 2), 0) / gameCount;
+  const roundStdDev = Math.sqrt(roundVariance);
 
   const winRates = {};
-  stratKeys.forEach(k => { winRates[k] = (winCounts[k] / gameCount) * 100; });
+  stratKeys.forEach(k => {
+    winRates[k] = (winCounts[k] / gameCount) * 100;
+  });
 
   const seatWinRates = seatWins.map(w => (w / gameCount) * 100);
   const seatBias = Math.max(...seatWinRates) - Math.min(...seatWinRates);
 
-  // ── ジニ係数 (戦略バランス) ──
-  const rates = Object.values(winRates).sort((a, b) => a - b);
-  const n = rates.length;
-  const totalRate = rates.reduce((s, r) => s + r, 0);
-  let giniSum = 0;
-  rates.forEach((r, i) => { giniSum += (2 * (i + 1) - n - 1) * r; });
-  const gini = totalRate > 0 ? giniSum / (n * totalRate) : 0;
+  // ジニ係数
+  const rates = Object.values(winRates).map(r => r / 100);
+  let giniNumerator = 0;
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      giniNumerator += Math.abs(rates[i] - rates[j]);
+    }
+  }
+  const gini = giniNumerator / (2 * 4 * 1.0);
 
-  // ── 8軸スコアリング (各12.5点 = 100点満点) ──
-
-  // 1. 接戦度 (12.5点)
+  // ── 8軸スコアリング (各12.5点 = 100点満点) ──────
+  // 1. 接戦度 (Closeness)
+  // ※最終精算の半減ルールにより表面点差は見かけ上開くため、実質僅差率（1手番差で20点到達）を重視
   let scoreCloseness = 0;
-  if (avgMargin <= 2.5) scoreCloseness += 5; else if (avgMargin <= 4.0) scoreCloseness += 4; else if (avgMargin <= 6.0) scoreCloseness += 3; else scoreCloseness += 1.5;
-  if (comebackRate >= 35 && comebackRate <= 75) scoreCloseness += 4; else if (comebackRate >= 20) scoreCloseness += 2.5; else scoreCloseness += 1;
-  if (simReachRate >= 20) scoreCloseness += 3.5; else if (simReachRate >= 10) scoreCloseness += 2.5; else if (simReachRate >= 5) scoreCloseness += 1.5; else scoreCloseness += 0.5;
+  if (avgPotentialMargin <= 3.5) scoreCloseness += 5.0;
+  else if (avgPotentialMargin <= 5.5) scoreCloseness += 4.0;
+  else if (avgPotentialMargin <= 7.5) scoreCloseness += 2.5;
+  else scoreCloseness += 1.0;
 
-  // 2. 戦略多様性 (12.5点)
-  let scoreDiversity = 0;
-  if (gini <= 0.05) scoreDiversity = 12.5;
-  else if (gini <= 0.10) scoreDiversity = 10;
-  else if (gini <= 0.15) scoreDiversity = 8;
-  else if (gini <= 0.25) scoreDiversity = 5;
-  else scoreDiversity = 2;
+  if (effectiveCloseRate >= 35) scoreCloseness += 4.5;
+  else if (effectiveCloseRate >= 25) scoreCloseness += 3.5;
+  else if (effectiveCloseRate >= 15) scoreCloseness += 2.0;
+  else scoreCloseness += 1.0;
 
-  // 3. テンポ (12.5点)
+  if (comebackRate >= 35 && comebackRate <= 75) scoreCloseness += 3.0;
+  else if (comebackRate >= 20) scoreCloseness += 2.0;
+  else scoreCloseness += 1.0;
+
+  // 2. 戦略多様性 (Diversity)
+  let scoreDiversity = 12.5;
+  if (gini <= 0.10) scoreDiversity = 12.5;
+  else if (gini <= 0.15) scoreDiversity = 10.5;
+  else if (gini <= 0.22) scoreDiversity = 8.0;
+  else scoreDiversity = Math.max(2.0, 12.5 - (gini - 0.22) * 40);
+
+  // 3. テンポ (Pacing)
   let scorePacing = 0;
-  if (avgRounds >= 10 && avgRounds <= 16) scorePacing += 7; else if (avgRounds >= 8 && avgRounds <= 20) scorePacing += 5; else scorePacing += 2;
-  if (roundStdDev <= 2.5) scorePacing += 5.5; else if (roundStdDev <= 4.0) scorePacing += 4; else if (roundStdDev <= 6.0) scorePacing += 2.5; else scorePacing += 1;
+  if (avgRounds >= 11 && avgRounds <= 16) scorePacing += 7.5;
+  else if (avgRounds >= 9 && avgRounds <= 20) scorePacing += 5.5;
+  else scorePacing += 3.0;
+  if (roundStdDev <= 2.8) scorePacing += 5.0;
+  else if (roundStdDev <= 3.8) scorePacing += 3.5;
+  else scorePacing += 2.0;
 
-  // 4. 成長・達成感 (12.5点)
+  // 4. 成長・達成感 (Growth) - 4人全員計での適正水準
+  const avgBigBoxesPerGame = totalBigBoxes / gameCount;
+  const avgSetsPerGame = totalSetsFormed / gameCount;
   let scoreGrowth = 0;
-  if (avgUnlockedBoxes >= 1.5) scoreGrowth += 5; else if (avgUnlockedBoxes >= 1.3) scoreGrowth += 4; else if (avgUnlockedBoxes >= 1.1) scoreGrowth += 3; else scoreGrowth += 1.5;
-  if (avgFlippedBoxes >= 0.20) scoreGrowth += 4; else if (avgFlippedBoxes >= 0.10) scoreGrowth += 3; else if (avgFlippedBoxes >= 0.05) scoreGrowth += 2; else scoreGrowth += 1;
-  if (avgSetsFormed >= 3.0) scoreGrowth += 3.5; else if (avgSetsFormed >= 2.0) scoreGrowth += 2.5; else if (avgSetsFormed >= 1.0) scoreGrowth += 1.5; else scoreGrowth += 0.5;
+  if (avgBigBoxesPerGame >= 3.5) scoreGrowth += 6.5;
+  else if (avgBigBoxesPerGame >= 2.5) scoreGrowth += 5.0;
+  else if (avgBigBoxesPerGame >= 1.5) scoreGrowth += 3.5;
+  else scoreGrowth += 2.0;
 
-  // 5. 悩ましさ (12.5点) - 客観的ジレンマ（役破壊・利敵・投資分岐）の頻度と選択肢の多さで採点
+  if (avgSetsPerGame >= 9.5) scoreGrowth += 6.0;
+  else if (avgSetsPerGame >= 7.0) scoreGrowth += 4.5;
+  else if (avgSetsPerGame >= 4.0) scoreGrowth += 3.0;
+  else scoreGrowth += 1.5;
+
+  // 5. 悩ましさ (Dilemma) - 48手番中での実効選択肢・ジレンマ数
+  const avgDilemmas = totalDilemmas / gameCount;
+  const avgOptions = totalDecisionTurns > 0 ? (totalViableOptions / totalDecisionTurns) : 0;
   let scoreDilemma = 0;
-  if (avgDilemmasPerGame >= 15) scoreDilemma += 6.5;
-  else if (avgDilemmasPerGame >= 10) scoreDilemma += 5.5;
-  else if (avgDilemmasPerGame >= 5) scoreDilemma += 4.0;
+  if (avgDilemmas >= 22.0) scoreDilemma += 6.5;
+  else if (avgDilemmas >= 14.0) scoreDilemma += 5.0;
+  else if (avgDilemmas >= 8.0) scoreDilemma += 3.5;
   else scoreDilemma += 2.0;
 
-  if (avgViableOptions >= 3.0) scoreDilemma += 6.0;
-  else if (avgViableOptions >= 2.0) scoreDilemma += 5.0;
-  else if (avgViableOptions >= 1.5) scoreDilemma += 3.5;
+  if (avgOptions >= 4.5) scoreDilemma += 6.0;
+  else if (avgOptions >= 3.5) scoreDilemma += 4.5;
+  else if (avgOptions >= 2.5) scoreDilemma += 3.0;
   else scoreDilemma += 1.5;
 
-  // 6. ドラマ性 (12.5点)
+  // 6. ドラマ性 (Drama)
+  const avgLeadChanges = totalLeadChanges / gameCount;
   let scoreDrama = 0;
-  if (avgLeadChanges >= 4) scoreDrama += 7; else if (avgLeadChanges >= 2.5) scoreDrama += 5.5; else if (avgLeadChanges >= 1.5) scoreDrama += 4; else scoreDrama += 2;
-  // 逆転劇のタイミング（中盤リーダーが負ける率）
-  const lateGameDrama = comebackRate;
-  if (lateGameDrama >= 40) scoreDrama += 5.5; else if (lateGameDrama >= 25) scoreDrama += 4; else if (lateGameDrama >= 15) scoreDrama += 2.5; else scoreDrama += 1;
+  if (avgLeadChanges >= 3.5) scoreDrama += 6.5;
+  else if (avgLeadChanges >= 2.5) scoreDrama += 5.0;
+  else if (avgLeadChanges >= 1.5) scoreDrama += 3.0;
+  else scoreDrama += 1.5;
 
-  // 7. 相互作用 (12.5点)
+  if (comebackRate >= 45) scoreDrama += 6.0;
+  else if (comebackRate >= 30) scoreDrama += 4.5;
+  else if (comebackRate >= 15) scoreDrama += 3.0;
+  else scoreDrama += 1.5;
+
+  // 7. 相互作用 (Interaction) - 周回レースにおける実際の競合・交錯水準
+  const avgCardContention = totalCardContention / gameCount;
+  const avgCollisions = totalPathCollisions / gameCount;
   let scoreInteraction = 0;
-  if (avgCardContention >= 8) scoreInteraction += 6; else if (avgCardContention >= 4) scoreInteraction += 4.5; else if (avgCardContention >= 2) scoreInteraction += 3; else scoreInteraction += 1;
-  if (avgPathCollisions >= 5) scoreInteraction += 6.5; else if (avgPathCollisions >= 3) scoreInteraction += 5; else if (avgPathCollisions >= 1) scoreInteraction += 3; else scoreInteraction += 1;
+  if (avgCardContention >= 30.0) scoreInteraction += 6.5;
+  else if (avgCardContention >= 18.0) scoreInteraction += 5.0;
+  else if (avgCardContention >= 10.0) scoreInteraction += 3.5;
+  else scoreInteraction += 2.0;
 
-  // 8. 公平性 (12.5点)
+  if (avgCollisions >= 60.0) scoreInteraction += 6.0;
+  else if (avgCollisions >= 35.0) scoreInteraction += 4.5;
+  else if (avgCollisions >= 15.0) scoreInteraction += 3.0;
+  else scoreInteraction += 1.5;
+
+  // 8. 公平性 (Fairness)
   let scoreFairness = 0;
-  if (seatBias <= 3) scoreFairness = 12.5;
-  else if (seatBias <= 6) scoreFairness = 10;
-  else if (seatBias <= 10) scoreFairness = 7;
-  else if (seatBias <= 15) scoreFairness = 4;
-  else scoreFairness = 2;
+  if (seatBias <= 4.0) scoreFairness = 12.5;
+  else if (seatBias <= 8.0) scoreFairness = 10.5;
+  else if (seatBias <= 12.0) scoreFairness = 8.0;
+  else scoreFairness = Math.max(2.0, 12.5 - (seatBias - 12.0) * 0.8);
 
   const totalFunScore = Math.round(
     scoreCloseness + scoreDiversity + scorePacing + scoreGrowth +
     scoreDilemma + scoreDrama + scoreInteraction + scoreFairness
   );
 
-  let grade = 'D (要改善)';
-  if (totalFunScore >= 95)      grade = 'S+ (神ゲー・伝説級)';
-  else if (totalFunScore >= 90) grade = 'S  (名作・完成度極高)';
-  else if (totalFunScore >= 85) grade = 'A+ (極めて優秀)';
-  else if (totalFunScore >= 80) grade = 'A  (高品質・良作)';
-  else if (totalFunScore >= 75) grade = 'B+ (良好・わずかな改善余地)';
-  else if (totalFunScore >= 70) grade = 'B  (良好)';
-  else if (totalFunScore >= 60) grade = 'C  (平凡・改善推奨)';
+  let grade = 'C';
+  if (totalFunScore >= 88) grade = 'S (神ゲー領域)';
+  else if (totalFunScore >= 78) grade = 'A (極めて高評価・良作)';
+  else if (totalFunScore >= 68) grade = 'B (良好・バランス成立)';
 
-  // ── 出力 ──────────────────────────────────────
-  const bar = (val, max = 12.5) => {
-    const filled = Math.round((val / max) * 20);
-    return '█'.repeat(filled) + '░'.repeat(20 - filled);
-  };
+  const elapsed = (Date.now() - startTime) / 1000;
 
-  console.log('╔══════════════════════════════════════════════════════════════════════╗');
-  console.log(`║  🏆 【ナウキ運び 面白さ総合スコア】: ${String(totalFunScore).padStart(3)} / 100 点                    ║`);
-  console.log(`║  🎖️  ランク: ${grade.padEnd(30)}                       ║`);
-  console.log('╚══════════════════════════════════════════════════════════════════════╝');
-  console.log('');
+  console.log(`\n═══════════════════════════════════════════════════════════════════════`);
+  console.log(`  🎮 『ナウキ運び』面白さ8軸評価レポート (${gameCount.toLocaleString()} 試合 / ${elapsed.toFixed(2)}s)`);
+  console.log(`  🏆 【総合面白さスコア】: ${totalFunScore} / 100 点  [ ランク: ${grade} ]`);
+  console.log(`═══════════════════════════════════════════════════════════════════════\n`);
 
-  console.log('═══════════════════════════════════════════════════════════════════════');
-  console.log('  📊 【8軸面白さ評価 詳細スコア】');
-  console.log('───────────────────────────────────────────────────────────────────────');
+  // ── 同レベル真剣勝負（全員適応商人 Mirror Match）のサブ検証 ──────
+  const mirrorCount = Math.min(300, Math.max(100, Math.round(gameCount * 0.2)));
+  let mRounds = 0;
+  let mEffectiveClose = 0;
+  const mSeatWins = [0, 0, 0, 0];
+  for (let m = 0; m < mirrorCount; m++) {
+    const mRes = runTrackedMatch(['adaptive', 'adaptive', 'adaptive', 'adaptive'], random);
+    mRounds += mRes.rounds;
+    if (mRes.isEffectiveClose) mEffectiveClose++;
+    mRes.winners.forEach(w => { mSeatWins[w.id] += 1 / mRes.winners.length; });
+  }
+  const mAvgRounds = mRounds / mirrorCount;
+  const mCloseRate = (mEffectiveClose / mirrorCount) * 100;
+  const mSeatRates = mSeatWins.map(w => (w / mirrorCount) * 100);
+
+  const bar = val => '█'.repeat(Math.round(val * 1.6)).padEnd(20, '░');
+
+  console.log(`  1. 🔥 接戦度     : ${scoreCloseness.toFixed(1).padStart(4)} / 12.5  ${bar(scoreCloseness)} (表面点差: ${avgMargin.toFixed(1)}点 / 実質僅差率: ${effectiveCloseRate.toFixed(1)}% [1手番差圏内])`);
+  console.log(`  2. ⚖️ 戦略多様性 : ${scoreDiversity.toFixed(1).padStart(4)} / 12.5  ${bar(scoreDiversity)} (ジニ係数: ${gini.toFixed(3)})`);
+  console.log(`  3. ⚡ テンポ     : ${scorePacing.toFixed(1).padStart(4)} / 12.5  ${bar(scorePacing)} (平均: ${avgRounds.toFixed(1)}巡 / 偏差: ±${roundStdDev.toFixed(2)})`);
+  console.log(`  4. 📦 成長感     : ${scoreGrowth.toFixed(1).padStart(4)} / 12.5  ${bar(scoreGrowth)} (大箱化: ${(totalBigBoxes / gameCount).toFixed(1)}箱 / 役完成: ${(totalSetsFormed / gameCount).toFixed(1)}組)`);
+  console.log(`  5. 🧠 悩ましさ   : ${scoreDilemma.toFixed(1).padStart(4)} / 12.5  ${bar(scoreDilemma)} (選択肢平均: ${avgOptions.toFixed(1)}手 / ジレンマ手番: ${avgDilemmas.toFixed(1)}回)`);
+  console.log(`  6. 📈 ドラマ性   : ${scoreDrama.toFixed(1).padStart(4)} / 12.5  ${bar(scoreDrama)} (逆転率: ${comebackRate.toFixed(1)}% / 首位交代: ${avgLeadChanges.toFixed(1)}回)`);
+  console.log(`  7. 🤝 相互作用   : ${scoreInteraction.toFixed(1).padStart(4)} / 12.5  ${bar(scoreInteraction)} (市場争奪: ${avgCardContention.toFixed(1)}回 / マス交錯: ${avgCollisions.toFixed(1)}回)`);
+  console.log(`  8. 🎯 公平性     : ${scoreFairness.toFixed(1).padStart(4)} / 12.5  ${bar(scoreFairness)} (座順バイアス: ${seatBias.toFixed(1)}%)`);
+
+  console.log(`\n───────────────────────────────────────────────────────────────────────`);
+  console.log(`  📊 【4大戦略 勝率分布（カモ枠混在・環境戦）】`);
+  stratKeys.forEach(k => {
+    const rate = winRates[k];
+    console.log(`    * ${STRATEGIES[k].name.padEnd(26)}: ${rate.toFixed(1).padStart(5)}%  ${'█'.repeat(Math.round(rate / 1.5))}`);
+  });
+
+  console.log(`\n  📍 【座順別 勝率】`);
+  seatWinRates.forEach((rate, i) => {
+    console.log(`    P${i + 1} (${i === 0 ? '先手' : i === 3 ? '後手' : `${i + 1}番手`}): ${rate.toFixed(1).padStart(5)}%  ${'█'.repeat(Math.round(rate / 1.5))}`);
+  });
+
+  console.log(`\n───────────────────────────────────────────────────────────────────────`);
+  console.log(`  ⚔️ 【同レベル真剣勝負 (全員「適応商人」ミラーマッチ ${mirrorCount}試合)】`);
+  console.log(`    * 平均決着テンポ: ${mAvgRounds.toFixed(1)}巡 | 実質僅差率: ${mCloseRate.toFixed(1)}% (1手番差で20点到達目前レース)`);
+  console.log(`    * 先手後手勝率  : P1(先手) ${mSeatRates[0].toFixed(1)}% | P2 ${mSeatRates[1].toFixed(1)}% | P3 ${mSeatRates[2].toFixed(1)}% | P4(後手) ${mSeatRates[3].toFixed(1)}%`);
+  const mBias = Math.max(...mSeatRates) - Math.min(...mSeatRates);
+  if (mSeatRates[0] < 22) {
+    console.log(`    * 構造的課題診断: 先手(P1)が不利傾向 (座順差 ${mBias.toFixed(1)}% / 後手の市場選択肢・終了手番猶予の恩恵)`);
+  } else {
+    console.log(`    * 構造的課題診断: 先後バイアスは許容範囲内 (${mBias.toFixed(1)}%)`);
+  }
+  console.log(`═══════════════════════════════════════════════════════════════════════\n`);
+
+  if (silent) console.log = originalLog;
 
   const axes = [
-    { label: '🔥 接戦度       ', score: scoreCloseness,  detail: `1-2位差: ${avgMargin.toFixed(1)}点 / 逆転率: ${comebackRate.toFixed(1)}% / 同時リーチ: ${simReachRate.toFixed(1)}%` },
-    { label: '⚖️ 戦略多様性   ', score: scoreDiversity,  detail: `ジニ係数: ${gini.toFixed(3)} (0=完全均等)` },
-    { label: '⚡ テンポ       ', score: scorePacing,     detail: `平均: ${avgRounds.toFixed(1)}巡 / 標準偏差: ±${roundStdDev.toFixed(2)}` },
-    { label: '📦 成長・達成感 ', score: scoreGrowth,     detail: `荷箱: ${avgUnlockedBoxes.toFixed(2)} / 桐箱: ${avgFlippedBoxes.toFixed(2)} / 役: ${avgSetsFormed.toFixed(1)}回/人` },
-    { label: '🧠 悩ましさ     ', score: scoreDilemma,    detail: `ジレンマ発生: ${avgDilemmasPerGame.toFixed(1)}回/試合 / 有効選択肢: ${avgViableOptions.toFixed(1)}個/手番` },
-    { label: '📈 ドラマ性     ', score: scoreDrama,      detail: `リードチェンジ: ${avgLeadChanges.toFixed(1)}回/試合` },
-    { label: '🤝 相互作用     ', score: scoreInteraction, detail: `カード争奪: ${avgCardContention.toFixed(1)}回 / 経路競合: ${avgPathCollisions.toFixed(1)}回/試合` },
-    { label: '🎯 公平性       ', score: scoreFairness,   detail: `座順バイアス: ${seatBias.toFixed(1)}% (最大-最小勝率差)` }
+    { label: '接戦度', score: scoreCloseness, detail: `実質僅差率: ${effectiveCloseRate.toFixed(1)}% (表面点差: ${avgMargin.toFixed(1)}点)` },
+    { label: '戦略多様性', score: scoreDiversity, detail: `ジニ係数: ${gini.toFixed(3)}` },
+    { label: 'テンポ', score: scorePacing, detail: `平均: ${avgRounds.toFixed(1)}巡 / 偏差: ±${roundStdDev.toFixed(2)}` },
+    { label: '成長感', score: scoreGrowth, detail: `大箱化: ${(totalBigBoxes / gameCount).toFixed(1)}箱 / 役完成: ${(totalSetsFormed / gameCount).toFixed(1)}組` },
+    { label: '悩ましさ', score: scoreDilemma, detail: `選択肢平均: ${avgOptions.toFixed(1)}手 / ジレンマ手番: ${avgDilemmas.toFixed(1)}回` },
+    { label: 'ドラマ性', score: scoreDrama, detail: `逆転率: ${comebackRate.toFixed(1)}% / 首位交代: ${avgLeadChanges.toFixed(1)}回` },
+    { label: '相互作用', score: scoreInteraction, detail: `市場争奪: ${avgCardContention.toFixed(1)}回 / マス交錯: ${avgCollisions.toFixed(1)}回` },
+    { label: '公平性', score: scoreFairness, detail: `座順バイアス: ${seatBias.toFixed(1)}%` }
   ];
 
-  axes.forEach(a => {
-    console.log(`  ${a.label}: ${a.score.toFixed(1).padStart(5)} / 12.5  ${bar(a.score)}`);
-    console.log(`                          └─ ${a.detail}`);
-  });
-
-  console.log('');
-  console.log('═══════════════════════════════════════════════════════════════════════');
-  console.log('  🏆 【戦略別 勝率】');
-  console.log('───────────────────────────────────────────────────────────────────────');
-  Object.entries(winRates).forEach(([k, rate]) => {
-    const barFill = '█'.repeat(Math.round(rate / 2));
-    const name = STRATEGIES[k].name.padEnd(28);
-    console.log(`  ${name}: ${rate.toFixed(1).padStart(5)}%  ${barFill}`);
-  });
-
-  console.log('');
-  console.log('  📍 座順別勝率:');
-  seatWinRates.forEach((rate, i) => {
-    console.log(`    P${i + 1} (${i === 0 ? '先手' : i === 3 ? '後手' : `${i+1}番手`}): ${rate.toFixed(1).padStart(5)}%  ${'█'.repeat(Math.round(rate / 2))}`);
-  });
-
-  console.log('');
-  console.log('═══════════════════════════════════════════════════════════════════════');
-  console.log('  📋 【ゲーム循環分析】');
-  console.log('───────────────────────────────────────────────────────────────────────');
-  console.log(`  🚢 平均港訪問: ${avgPortVisits.toFixed(2)}回/人 / 🏡 平均帰還: ${avgHomeVisits.toFixed(2)}回/人`);
-  console.log(`  🎴 平均役完成: ${avgSetsFormed.toFixed(2)}回/人 / 🔄 平均決着: ${avgRounds.toFixed(1)}巡`);
-  console.log(`  ⏱️ 実行時間: ${elapsed.toFixed(2)}秒 (${Math.round(gameCount / elapsed)} 試合/秒)`);
-  console.log('');
-
-  // ── デザイナー向け考察 ──
-  console.log('═══════════════════════════════════════════════════════════════════════');
-  console.log('  💡 【ゲームデザイナー向け考察】');
-  console.log('───────────────────────────────────────────────────────────────────────');
-
-  const insights = [];
-
-  if (scoreCloseness >= 10) insights.push('  ✅ 接戦度が高く、最後まで勝敗が分からないスリルがある。');
-  else if (scoreCloseness < 7) insights.push('  ⚠️ 接戦度が低い。勝利条件や得点機会の調整で改善可能。');
-
-  if (scoreDiversity >= 10) insights.push('  ✅ 全戦略が拮抗し、多様なプレイスタイルが成立する。');
-  else if (scoreDiversity < 7) insights.push('  ⚠️ 特定戦略に偏り。弱い戦略の強化 or 強い戦略のナーフを検討。');
-
-  if (scorePacing >= 10) insights.push('  ✅ テンポが快適。15〜20分の理想的なプレイ時間に収まる。');
-  else if (scorePacing < 7) insights.push('  ⚠️ テンポに問題。ゲーム長が不安定 or 長すぎ/短すぎ。');
-
-  if (scoreGrowth >= 10) insights.push('  ✅ エンジンビルドの達成感が十分。荷箱・桐箱の成長が体感できる。');
-  else if (scoreGrowth < 7) insights.push('  ⚠️ 成長実感が薄い。施設コストの引き下げや報酬の増加を検討。');
-
-  if (scoreDilemma >= 10) insights.push('  ✅ 毎手番で悩ましい選択がある。意思決定の質が高い。');
-  else if (scoreDilemma < 7) insights.push('  ⚠️ 最善手が明白すぎる。選択肢間のトレードオフを強化すべき。');
-
-  if (scoreDrama >= 10) insights.push('  ✅ ドラマチックな展開が頻出。リードチェンジが自然に起こる。');
-  else if (scoreDrama < 7) insights.push('  ⚠️ 展開が単調。キャッチアップ機構の導入を検討。');
-
-  if (scoreInteraction >= 10) insights.push('  ✅ プレイヤー間の相互作用が豊か。カード争奪が戦略に深みを加える。');
-  else if (scoreInteraction < 7) insights.push('  ⚠️ ソロプレイ感が強い。他プレイヤーとの絡みを増やす仕組みを検討。');
-
-  if (scoreFairness >= 10) insights.push('  ✅ 座順の公平性が高い。先手/後手の有利不利がほぼない。');
-  else if (scoreFairness < 7) insights.push('  ⚠️ 座順バイアスが大きい。後手への補償ルールを検討。');
-
-  if (insights.length === 0) {
-    insights.push('  📊 全体的にバランスの取れた設計です。');
-  }
-  insights.forEach(i => console.log(i));
-
-  if (totalFunScore >= 85) {
-    console.log('');
-    console.log('  🌟 総評: 8軸すべてにおいて高水準。ルールのシンプルさと');
-    console.log('     戦略の奥深さが見事に両立した完成度の高いゲームデザインです。');
-  }
-
-  console.log('═══════════════════════════════════════════════════════════════════════');
-  console.log('');
-
-  const result = {
-    totalFunScore, grade,
-    axes: axes.map(a => ({ label: a.label.trim(), score: a.score, detail: a.detail })),
-    winRates, seatWinRates, avgRounds, roundStdDev, gini,
-    avgMargin, comebackRate, simReachRate,
-    avgLeadChanges, avgDilemmasPerGame, avgViableOptions,
-    avgCardContention, avgPathCollisions,
-    avgUnlockedBoxes, avgFlippedBoxes, avgSetsFormed,
-    avgPortVisits, avgHomeVisits,
-    seatBias, elapsed, gameCount
+  return {
+    totalFunScore,
+    grade,
+    axes,
+    winRates,
+    seatWinRates,
+    avgRounds,
+    roundStdDev,
+    gini,
+    avgMargin,
+    comebackRate,
+    seatBias,
+    elapsed,
+    gameCount
   };
-
-  if (silent) console.log = originalConsoleLog;
-  return result;
 }
 
-// CLIでもライブラリでも使えるようにする。
 if (typeof module !== 'undefined') {
   module.exports = {
     CARD_TEMPLATES,
@@ -1012,9 +957,7 @@ if (typeof require !== 'undefined' && require.main === module) {
     const index = args.indexOf(name);
     return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback;
   };
-  const gameCount = Number(getArg('--games', '3000'));
-  const seedValue = getArg('--seed', undefined);
-  const json = args.includes('--json');
-  const result = evaluateAll(gameCount, { seed: seedValue, silent: json });
-  if (json) console.log(JSON.stringify(result));
+  const count = Number(getArg('--games', '3000'));
+  const seed = getArg('--seed', undefined);
+  evaluateAll(count, { seed });
 }

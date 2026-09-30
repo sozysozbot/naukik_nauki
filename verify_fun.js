@@ -56,11 +56,10 @@ assert(first.seatBias >= 0 && first.seatBias <= 100, '座順バイアスが割�
 // 代表試合でも、終了判定・箱数・得点の値が破綻していないこと
 for (let i = 0; i < 20; i++) {
   const match = runTrackedMatch(undefined, () => (i * 0.037) % 1);
-  assert(match.winner, '各試合に勝者がいること');
+  assert(match.winners && match.winners.length > 0, '各試合に勝者がいること');
   match.players.forEach(player => {
     assert(player.score >= 0, '得点が負にならないこと');
-    assert(player.boxes.length === 4, '箱スロット数が4であること');
-    assert(player.boxes.filter(box => box.unlocked).length >= 1, '初期箱が維持されること');
+    assert.strictEqual(player.boxes.length, 2, '箱スロット数が2（各自2枚固定）であること');
   });
 }
 
