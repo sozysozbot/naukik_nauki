@@ -1,7 +1,7 @@
 @import "reset.css";
 
 :root {
-    --color-blue: #2672b2;
+    --color-blue: #53a6fb;
     --color-coral: #cb4e44;
     --color-mustard: #dfa234;
     --color-text: #253342;
@@ -32,7 +32,7 @@ img {
 }
 
 h1 {
-    font-size: 15q;
+    font-size: 14q;
     color: var(--color-coral);
     font-weight: bold;
     margin-top: 1em;
@@ -140,7 +140,7 @@ ul li::before {
 
 .lead,
 .lead p {
-    color: var(--color-text);
+    color: var(--color-blue);
     font-size: 11q;
     font-weight: bold;
     line-height: 1.5;
