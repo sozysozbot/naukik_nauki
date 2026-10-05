@@ -1,11 +1,10 @@
 @import "reset.css";
 
 :root {
-    --color-blue: #53a6fb;
+    --color-blue: #5a82aa;
     --color-coral: #cb4e44;
     --color-mustard: #dfa234;
     --color-text: #253342;
-    --color-flavor: #4d89bd;
 }
 
 @page {
@@ -156,7 +155,7 @@ strong {
 }
 
 .flavor {
-    color: var(--color-flavor);
+    color: var(--color-blue);
 }
 
 ruby {
