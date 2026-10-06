@@ -8,14 +8,17 @@
 }
 
 @page {
-    margin: 6mm;
+    margin-top: 4mm;
+    margin-bottom: 4mm;
+    margin-left: 5mm;
+    margin-right: 5mm;
     size: 182mm 257mm;
     background-color: #fcfbf9;
 }
 
 html {
     writing-mode: horizontal-tb;
-    font-family: "Rounded M+ 1p", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-family: "Rounded M+ 1p";
     color: var(--color-text);
     column-count: 3;
     column-gap: 3mm;
@@ -30,11 +33,16 @@ img {
     break-inside: avoid;
 }
 
+h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+    break-inside: avoid;
+}
+
 h1 {
-    font-size: 14q;
+    font-size: 12q;
     color: var(--color-coral);
     font-weight: bold;
-    margin-top: 1em;
+    margin-top: 0.6em;
     margin-bottom: 0.4em;
     border-left: 1.2mm solid var(--color-mustard);
     padding-left: 0.4em;
@@ -43,18 +51,6 @@ h1 {
 }
 
 h2 {
-    font-size: 12q;
-    color: var(--color-coral);
-    font-weight: bold;
-    margin-top: 0.8em;
-    margin-bottom: 0.35em;
-    border-left: 0.9mm solid var(--color-mustard);
-    padding-left: 0.4em;
-    break-after: avoid;
-    break-inside: avoid;
-}
-
-h3 {
     font-size: 11q;
     color: var(--color-coral);
     font-weight: bold;
@@ -66,7 +62,7 @@ h3 {
     break-inside: avoid;
 }
 
-h4 {
+h3 {
     font-size: 11q;
     color: var(--color-text);
     font-weight: bold;
@@ -76,11 +72,21 @@ h4 {
     break-inside: avoid;
 }
 
-h4::before {
+h3::before {
     content: "◆ ";
     font-size: 7.5q;
     color: var(--color-mustard);
     vertical-align: 0.1em;
+}
+
+h4 {
+    font-size: 11q;
+    color: var(--color-text);
+    font-weight: bold;
+    margin-top: 0.4em;
+    margin-bottom: 0.2em;
+    break-after: avoid;
+    break-inside: avoid;
 }
 
 hr {
@@ -156,6 +162,15 @@ strong {
 
 .flavor {
     color: var(--color-blue);
+}
+
+.small {
+    font-size: 9q;
+}
+
+.pemecepe {
+    font-family: "linzklar_rounded";
+    font-size: 9q;
 }
 
 ruby {

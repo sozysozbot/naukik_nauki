@@ -2,9 +2,9 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="112.12822mm"
-   height="35mm"
-   viewBox="0 0 112.12822 35.000001"
+   width="112.12821mm"
+   height="31.636469mm"
+   viewBox="0 0 112.12821 31.63647"
    version="1.1"
    id="svg1"
    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
@@ -24,9 +24,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="0.80265853"
-     inkscape:cx="154.48662"
-     inkscape:cy="223.63184"
+     inkscape:zoom="1.6053171"
+     inkscape:cx="116.48789"
+     inkscape:cy="156.04394"
      inkscape:window-width="1920"
      inkscape:window-height="1145"
      inkscape:window-x="-8"
@@ -62,33 +62,33 @@
        xlink:href="#image2"
        clip-path="url(#clipPath1)"
        id="use1"
-       transform="matrix(1.489845,0,0,1.489845,12.801369,-17.726728)" />
+       transform="matrix(1.3483642,0,0,1.3483642,14.015197,-12.523478)" />
     <ellipse
-       style="fill:none;stroke:#ff6600;stroke-width:0.636164;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
+       style="fill:none;stroke:#ff6600;stroke-width:0.575752;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
        id="path2"
-       cx="70.483894"
-       cy="50.575443"
-       rx="4.9000812"
-       ry="3.331311" />
+       cx="66.219994"
+       cy="49.292484"
+       rx="4.4347529"
+       ry="3.0149584" />
     <path
-       style="fill:none;stroke:#ff6600;stroke-width:0.18921;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
-       d="m 65.583814,50.575443 -4.52479,-2.612391"
+       style="fill:none;stroke:#ff6600;stroke-width:0.171242;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
+       d="M 61.785241,49.292486 57.69014,46.928176"
        id="path3" />
     <text
        xml:space="preserve"
-       style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;font-size:6.9529px;line-height:0;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Heavy';text-align:center;letter-spacing:-0.124669px;word-spacing:-0.00556561px;writing-mode:lr-tb;direction:ltr;text-orientation:upright;text-anchor:middle;fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0534297;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
-       x="42.514942"
-       y="46.390682"
+       style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;font-size:6.29263px;line-height:0;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Heavy';text-align:center;letter-spacing:-0.11283px;word-spacing:-0.00503708px;writing-mode:lr-tb;direction:ltr;text-orientation:upright;text-anchor:middle;fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0483558;stroke-linecap:square;stroke-dasharray:none;paint-order:stroke markers fill"
+       x="40.907066"
+       y="45.505123"
        id="text3"><tspan
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;line-height:1.2;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Heavy';fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0534297"
-         x="42.514942"
-         y="46.390682"
+         style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;line-height:1.2;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Heavy';fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0483558"
+         x="40.907066"
+         y="45.505123"
          id="tspan5">塩アイコン</tspan><tspan
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:5.25584px;line-height:0.8;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Bold';fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0534297"
-         x="42.452606"
-         y="52.053818"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:4.75673px;line-height:0.8;font-family:'Rounded M+ 1p';-inkscape-font-specification:'Rounded M+ 1p Bold';fill:#ff6600;fill-opacity:1;stroke:none;stroke-width:0.0483558"
+         x="40.850651"
+         y="50.63047"
          id="tspan6">(これは2塩)</tspan></text>
   </g>
 </svg>

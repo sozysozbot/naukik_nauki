@@ -1,0 +1,186 @@
+@import "reset.css";
+
+:root {
+    --color-blue: #5a82aa;
+    --color-coral: #cb4e44;
+    --color-mustard: #dfa234;
+    --color-text: #253342;
+}
+
+@page {
+    margin-top: 4mm;
+    margin-bottom: 4mm;
+    margin-left: 5mm;
+    margin-right: 5mm;
+    size: 182mm 257mm;
+    background-color: #fcfbf9;
+}
+
+html {
+    writing-mode: horizontal-tb;
+    font-family: "linzklar_rounded";
+    color: var(--color-text);
+    column-count: 3;
+    column-gap: 3mm;
+    column-fill: auto;
+}
+
+img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0.5em auto;
+    break-inside: avoid;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+h1 {
+    font-size: 12q;
+    color: var(--color-coral);
+    font-weight: bold;
+    margin-top: 0.6em;
+    margin-bottom: 0.4em;
+    border-left: 1.2mm solid var(--color-mustard);
+    padding-left: 0.4em;
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+h2 {
+    font-size: 11q;
+    color: var(--color-coral);
+    font-weight: bold;
+    margin-top: 0.65em;
+    margin-bottom: 0.25em;
+    border-bottom: 0.35mm solid var(--color-mustard);
+    padding-bottom: 0.1em;
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+h3 {
+    font-size: 11q;
+    color: var(--color-text);
+    font-weight: bold;
+    margin-top: 0.5em;
+    margin-bottom: 0.2em;
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+h3::before {
+    content: "◆ ";
+    font-size: 7.5q;
+    color: var(--color-mustard);
+    vertical-align: 0.1em;
+}
+
+h4 {
+    font-size: 11q;
+    color: var(--color-text);
+    font-weight: bold;
+    margin-top: 0.4em;
+    margin-bottom: 0.2em;
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+hr {
+    border: none;
+    border-top: 0.35mm solid var(--color-mustard);
+    margin: 0.6em 0;
+}
+
+p {
+    font-size: 11q;
+    line-height: 1.45;
+    text-align: justify;
+    text-justify: inter-ideograph;
+    margin-bottom: 0.5em;
+}
+
+ol {
+    list-style: none;
+    counter-reset: ol-num;
+    margin-bottom: 0.5em;
+}
+
+ol li {
+    counter-increment: ol-num;
+    font-size: 11q;
+    line-height: 1.4;
+    padding-left: 1.6em;
+    text-indent: -1.6em;
+    margin-bottom: 0.25em;
+    break-inside: avoid;
+}
+
+ol li::before {
+    content: counter(ol-num) ". ";
+    font-weight: bold;
+}
+
+ul {
+    list-style: none;
+    margin-bottom: 0.5em;
+}
+
+ul li {
+    font-size: 11q;
+    line-height: 1.4;
+    padding-left: 1.2em;
+    text-indent: -1.2em;
+    margin-bottom: 0.25em;
+    break-inside: avoid;
+}
+
+ul li::before {
+    content: "・";
+    font-weight: bold;
+}
+
+.lead,
+.lead p {
+    color: var(--color-blue);
+    font-size: 11q;
+    font-weight: bold;
+    line-height: 1.5;
+    margin-bottom: 0.6em;
+}
+
+strong {
+    font-weight: bold;
+}
+
+.space {
+    margin: 5mm;
+}
+
+.flavor {
+    color: var(--color-blue);
+}
+
+.small {
+    font-size: 9q;
+}
+
+ruby {
+    ruby-align: center;
+}
+
+rt {
+    font-size: 6q;
+    letter-spacing: -1q;
+    position: relative;
+}
+
+.span-all {
+    column-span: all;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
