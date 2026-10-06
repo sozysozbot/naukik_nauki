@@ -76,7 +76,7 @@ h3::before {
     content: "◆ ";
     font-size: 7.5q;
     color: var(--color-mustard);
-    vertical-align: 0.1em;
+    vertical-align: 0.3em;
 }
 
 h4 {
