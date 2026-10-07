@@ -27,13 +27,13 @@ co letit leti lap e nauki (ka e batan cupoi leti cutapijot. lucit ka pi boncenai
  * **cuit leti lata leti zo** (4lt)
  * **nucti leti cexe** (pulan kanteit 1lt nucti pi coxet kanteit 3lt nucti)
 
-# 3. belpic leti xep pulac
+# 2. belpic leti xep pulac
 mak-mak it tudekile jo nukil-polto at makanamele pi letit 2? nucti.
 ![](flow.svg)
 
 2? o xep late letit leti lata mol pi cai e lucuc pi belpic e lucuc. letit cet jo auc leti late leti lata delu molkait.
 
-# 2. penen
+# 3. penen
 
 ## lauzait lime
 amolit 6lt lime leti bepale.
